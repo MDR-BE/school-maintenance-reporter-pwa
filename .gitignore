@@ -1,0 +1,39 @@
+# Lock files
+.~lock.*
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*~
+
+# Environment variables
+.env
+.env.*
+
+# Node modules
+node_modules/
+
+# Build outputs
+dist/
+build/
+
+# Misc
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+.cache

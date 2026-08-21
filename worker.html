@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Maintenance Worker - School Maintenance</title>
+    <link rel="manifest" href="./manifest.json">
+    <link rel="stylesheet" href="./css/styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Maintenance Worker</h1>
+        <div class="worker-toolbar">
+            <div class="filter-group">
+                <label for="filter-status">Status:</label>
+                <select id="filter-status">
+                    <option value="">All</option>
+                    <option value="New">New</option>
+                    <option value="Planned">Planned</option>
+                    <option value="In progress">In progress</option>
+                    <option value="Waiting for materials">Waiting for materials</option>
+                    <option value="Completed">Completed</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label for="filter-urgency">Urgency:</label>
+                <select id="filter-urgency">
+                    <option value="">All</option>
+                    <option value="Normal">Normal</option>
+                    <option value="Important">Important</option>
+                    <option value="Urgent">Urgent</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label for="filter-location">Location:</label>
+                <input type="text" id="filter-location" placeholder="Filter by location">
+            </div>
+            <button id="apply-filters" class="submit-btn">Apply Filters</button>
+            <button id="reset-filters" class="cancel-btn">Reset</button>
+        </div>
+
+        <div id="task-list-container">
+            <h2>Tasks</h2>
+            <div id="task-list-loading">Loading tasks...</div>
+            <ul id="task-list" class="task-list"></ul>
+        </div>
+
+        <div id="task-detail-container" class="hidden">
+            <h2>Task Details</h2>
+            <button id="back-to-list" class="cancel-btn">&#8592; Back to List</button>
+            <div id="task-detail-content">
+                <!-- Task detail will be inserted here -->
+            </div>
+        </div>
+    </div>
+    <script src="./js/utils.js"></script>
+    <script src="./js/api.js"></script>
+    <script src="./js/worker.js"></script>
+</body>
+</html>

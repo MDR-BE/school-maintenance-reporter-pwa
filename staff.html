@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Report Issue - School Maintenance</title>
+    <link rel="manifest" href="./manifest.json">
+    <link rel="stylesheet" href="./css/styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Report a Problem</h1>
+        <form id="report-form">
+            <div>
+                <label for="photo">Photo (optional)</label>
+                <input type="file" id="photo" accept="image/*" capture="environment">
+            </div>
+            <div>
+                <label for="description">Problem Description</label>
+                <textarea id="description" rows="4" placeholder="Describe the problem..." required></textarea>
+            </div>
+            <div>
+                <label for="location">Location</label>
+                <input type="text" id="location" placeholder="e.g., Gang L4 (tussen L4 en L3)" required>
+            </div>
+            <div>
+                <label for="urgency">Urgency</label>
+                <select id="urgency" required>
+                    <option value="">Select urgency</option>
+                    <option value="Normal">Normal</option>
+                    <option value="Important">Important</option>
+                    <option value="Urgent">Urgent</option>
+                </select>
+            </div>
+            <button type="submit" class="submit-btn">Report Problem</button>
+            <button type="button" id="cancel-btn" class="cancel-btn">Cancel</button>
+        </form>
+        <div id="form-message" class="hidden"></div>
+    </div>
+    <script src="./js/utils.js"></script>
+    <script src="./js/api.js"></script>
+    <script src="./js/staff.js"></script>
+</body>
+</html>

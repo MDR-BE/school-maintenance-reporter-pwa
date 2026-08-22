@@ -1,21 +1,27 @@
-// Configuration
+// ====================== Configuration ======================
 const SHEET_NAME_PATTERN = /^klusjes \d{8}$/; // Matches klusjes DDMMYYYY
 const PHOTO_FOLDER_NAME = 'Klusjes/Photos';
-// List of maintenance worker emails (for access control)
-// In a real deployment, this would be stored in Script Properties or a separate sheet.
-// For MVP, we can hardcode or read from a sheet. We'll use Script Properties for flexibility.
-const MAINTENANCE_WORKER_PROPERTY = 'maintenance_workers';
+// ID of the specific spreadsheet we want to use
+const TARGET_SPREADSHEET_ID = '1HtYJqAWengq_wvEbt2SE_Rx4cPwSyal5YwHbp_Z0wVY';
+// Property keys
+const MAINTENANCE_WORKER_PROPERTY = 'maintenance_worker';     // e‑mail of the maintenance worker
+const LOGIN_PASSWORD_PROPERTY   = 'login_password';          // the gate password (set once)
+const AUTH_TOKEN_PROPERTY_PREFIX = 'auth_token_';           // prefix for per‑user token storage
+const FRONTEND_URL_PROPERTY     = 'frontend_url';            // URL of the GitHub Pages PWA
+const TOKEN_TTL_MS = 15 * 60 * 1000;                         // 15 minutes
+
 // Default urgency levels and statuses (for validation)
 const VALID_URGENCIES = ['Normal', 'Important', 'Urgent'];
-const VALID_STATUSES = ['New', 'Planned', 'In progress', 'Waiting for materials', 'Completed'];
+const VALID_STATUSES  = ['New', 'Planned', 'In progress', 'Waiting for materials', 'Completed'];
 
+// ====================== Helper Functions ======================
 /**
- * Returns the active sheet (most recent sheet matching the pattern).
+ * Returns the active sheet (most recent sheet matching the pattern) from the target spreadsheet.
  * If no sheet matches, creates a new one with today's date.
  * @return {GoogleAppsScript.Spreadsheet.Sheet} The active sheet.
  */
 function getActiveSheet() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = SpreadsheetApp.openById(TARGET_SPREADSHEET_ID);
   const sheets = ss.getSheets();
   let activeSheet = null;
   let latestDate = null;
@@ -23,12 +29,11 @@ function getActiveSheet() {
   for (const sheet of sheets) {
     const name = sheet.getName();
     if (SHEET_NAME_PATTERN.test(name)) {
-      // Extract date from sheet name: klusjes DDMMYYYY
       const dateStr = name.substring(8); // after 'klusjes '
       const day = parseInt(dateStr.substring(0, 2), 10);
       const month = parseInt(dateStr.substring(2, 4), 10);
       const year = parseInt(dateStr.substring(4, 8), 10);
-      const date = new Date(year, month - 1, day); // month is 0-indexed
+      const date = new Date(year, month - 1, day); // month is 0‑indexed
       if (!latestDate || date > latestDate) {
         latestDate = date;
         activeSheet = sheet;
@@ -37,14 +42,13 @@ function getActiveSheet() {
   }
 
   if (!activeSheet) {
-    // No matching sheet found, create a new one with today's date
+    // No matching sheet – create one for today
     const today = new Date();
     const day = String(today.getDate()).padStart(2, '0');
     const month = String(today.getMonth() + 1).padStart(2, '0');
     const year = today.getFullYear();
     const sheetName = `klusjes ${day}${month}${year}`;
     activeSheet = ss.insertSheet(sheetName);
-    // Set up headers
     const headers = [
       'Omschrijving',           // 0
       'naam aanvrager',         // 1
@@ -79,27 +83,503 @@ function getPhotoFolder() {
 }
 
 /**
- * Checks if the current user is a maintenance worker.
- * @return {boolean} True if the user is a maintenance worker.
+ * Returns the maintenance worker e‑mail (set via setMaintenanceWorker).
+ * @return {string} The maintenance worker e‑mail.
  */
-function isMaintenanceWorker() {
-  const email = Session.getActiveUser().getEmail();
-  const workers = PropertiesService.getScriptProperties().getProperty(MAINTENANCE_WORKER_PROPERTY);
-  if (!workers) {
-    // If no workers are set, we allow everyone (for initial setup)
-    // In production, you should set this property.
-    return false;
-  }
-  const workerList = workers.split(',').map(w => w.trim());
-  return workerList.includes(email);
+function getMaintenanceWorker() {
+  return PropertiesService.getScriptProperties().getProperty(MAINTENANCE_WORKER_PROPERTY) || '';
 }
 
 /**
- * Returns the current user's email.
- * @return {string} The user's email.
+ * Sets the maintenance worker e‑mail.
+ * @param {string} email - The maintenance worker e‑mail address.
  */
-function getCurrentUserEmail() {
-  return Session.getActiveUser().getEmail();
+function setMaintenanceWorker(email) {
+  PropertiesService.getScriptProperties().setProperty(MAINTENANCE_WORKER_PROPERTY, email);
+}
+
+/**
+ * Returns the login password for the gate.
+ * @return {string} The password.
+ */
+function getLoginPassword() {
+  return PropertiesService.getScriptProperties().getProperty(LOGIN_PASSWORD_PROPERTY) || '';
+}
+
+/**
+ * Sets the login password for the gate.
+ * @param {string} password - The password to protect the PWA.
+ */
+function setLoginPassword(password) {
+  if (typeof password !== 'string' || password === '') {
+    throw new Error('Password must be a non-empty string.');
+  }
+  PropertiesService.getScriptProperties().setProperty(LOGIN_PASSWORD_PROPERTY, password);
+}
+
+/**
+ * Returns the frontend URL (GitHub Pages) where the PWA lives.
+ * @return {string} The frontend URL.
+ */
+function getFrontendUrl() {
+  return PropertiesService.getScriptProperties().getProperty(FRONTEND_URL_PROPERTY) || '';
+}
+
+/**
+ * Sets the frontend URL.
+ * @param {string} url - The URL of the GitHub Pages PWA (e.g. https://mdr-be.github.io/school-maintenance-reporter-pwa/).
+ */
+function setFrontendUrl(url) {
+  PropertiesService.getScriptProperties().setProperty(FRONTEND_URL_PROPERTY, url);
+}
+
+/**
+ * Returns the origin of the frontend (GitHub Pages) for CORS headers.
+ * @return {string} The origin (e.g., https://mdr-be.github.io) or * if unable to determine.
+ */
+function getFrontendOrigin() {
+  const frontendUrl = PropertiesService.getScriptProperties().getProperty(FRONTEND_URL_PROPERTY) || '';
+  try {
+    const url = new URL(frontendUrl);
+    return url.origin;   // e.g. https://mdr-be.github.io
+  } catch (_) {
+    // fallback – allow any origin (less secure, but works if you can't determine it)
+    return '*';
+  }
+}
+
+/**
+ * Adds CORS headers to a ContentService output.
+ * @param {ContentService.TextOutput} output The output to modify.
+ * @return {ContentService.TextOutput} The output with CORS headers.
+ */
+function addCorsHeaders(output) {
+  return output
+    .setHeader('Access-Control-Allow-Origin', getFrontendOrigin())
+    .setHeader('Access-Control-Allow-Credentials', 'true');
+}
+
+/**
+ * Adds CORS headers to an HtmlService output.
+ * @param {HtmlService.HtmlOutput} output The output to modify.
+ * @return {HtmlService.HtmlOutput} The output with CORS headers.
+ */
+function addCorsHeadersHtml(output) {
+  return output
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
+    .setHeader('Access-Control-Allow-Origin', getFrontendOrigin())
+    .setHeader('Access-Control-Allow-Credentials', 'true');
+}
+
+/**
+ * Creates a random UUID-like token.
+ * @return {string} A random token.
+ */
+function createToken() {
+  return Utilities.getUuid();
+}
+
+/**
+ * Stores a token with a timestamp in the current user's properties.
+ * @param {string} token - The token to store.
+ */
+function storeToken(token) {
+  PropertiesService.getUserProperties().setProperty(token, Date.now().toString());
+}
+
+/**
+ * Checks whether a token exists and is still valid (not expired).
+ * @param {string} token - The token to validate.
+ * @return {boolean} True if token exists and is within TTL.
+ */
+function isValidToken(token) {
+  const ts = PropertiesService.getUserProperties().getProperty(token);
+  if (!ts) return false;
+  return (Date.now() - parseInt(ts, 10)) < TOKEN_TTL_MS;
+}
+
+/**
+ * Removes a token from user properties (logout).
+ * @param {string} token - The token to remove.
+ */
+function removeToken(token) {
+  PropertiesService.getUserProperties().deleteProperty(token);
+}
+
+/**
+ * Extracts the pwa_auth token from the request cookie.
+ * @param {Object} e - The event parameter.
+ * @return {string|null} The token if present, otherwise null.
+ */
+function getAuthTokenFromRequest(e) {
+  if (!e.cookie) return null;
+  const match = e.cookie.match(/(?:^|;)\s*pwa_auth=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+/**
+ * Checks whether the current request is authenticated.
+ * @param {Object} e - The event parameter.
+ * @return {boolean} True if authenticated.
+ */
+function checkAuth(e) {
+  const token = getAuthTokenFromRequest(e);
+  return token !== null && isValidToken(token);
+}
+
+/**
+ * Returns an unauthorized JSON response with CORS headers.
+ * @return {ContentService.TextOutput} JSON with error.
+ */
+function authError() {
+  return addCorsHeaders(
+    ContentService
+      .createTextOutput(JSON.stringify({ error: 'Not authorized' }))
+      .setMimeType(ContentService.MimeType.JSON)
+  );
+}
+
+/**
+ * Login page HTML shown when the user is not authenticated.
+ */
+const LOGIN_PAGE = `
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PWA Login</title>
+  <style>
+    body {font-family: Arial, sans-serif; background:#f5f5f5; margin:0; padding:0; display:flex; height:100vh; align-items:center; justify-content:center;}
+    .card {background:#fff; padding:2rem; border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,.1); width:320px;}
+    h2 {margin-top:0;}
+    label {display:block; margin-top:1.5rem;}
+    input {width:100%; padding:0.5rem; margin-top:0.25rem; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;}
+    button {margin-top:1.5rem; width:100%; padding:0.75rem; background:#1976d2; color:#fff; border:none; border-radius:4px; cursor:pointer;}
+    button:hover {background:#1565c0;}
+    .error {color:#d32f2f; margin-top:1rem; font-size:0.9rem;}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Toegang tot de PWA</h2>
+    <form id="loginForm">
+      <label for="password">Wachtwoord:</label>
+      <input type="password" id="password" name="password" autocomplete="current-password" required>
+      <button type="submit">Inloggen</button>
+      <div id="error" class="error"></div>
+    </form>
+  </div>
+  <script>
+    const form = document.getElementById('loginForm');
+    const errorDiv = document.getElementById('error');
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      errorDiv.textContent = '';
+      const password = document.getElementById('password').value;
+      const resp = await fetch(window.location.href + '?action=validate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: new URLSearchParams({password: password})
+      });
+      const data = await resp.json();
+      if (data.success) {
+        // Set cookie and redirect to frontend
+        document.cookie = "pwa_auth=" + data.token + "; path=/; max-age=" + (15*60) + "; SameSite=Lax";
+        window.location.href = "' + getFrontendUrl() + '";
+      } else {
+        errorDiv.textContent = data.error || 'Ongeldig wachtwoord';
+      }
+    });
+  </script>
+</body>
+</html>
+`;
+
+/**
+ * Handles GET requests.
+ * Supported actions:
+ *   (no action) or action=login -> show login page
+ *   action=list / action=get   -> require auth, then proxy to API
+ *   action=validate            -> handled via POST (see doPost)
+ * @param {Object} e The event parameter.
+ * @return {string} JSON or HTML response.
+ */
+function doGet(e) {
+  // If no action or action equals 'login', show login page
+  if (!e.parameter || !e.parameter.action || e.parameter.action === 'login') {
+    return addCorsHeadersHtml(
+      HtmlService.createHtmlOutput(LOGIN_PAGE)
+    );
+  }
+
+  // For API actions, require authentication
+  if (!checkAuth(e)) {
+    return authError();
+  }
+
+  const action = e.parameter.action;
+  if (action === 'list') {
+    const filters = {};
+    if (e.parameter.status) filters.status = e.parameter.status;
+    if (e.parameter.urgency) filters.urgency = e.parameter.urgency;
+    if (e.parameter.location) filters.location = e.parameter.location;
+    const limit = e.parameter.limit ? parseInt(e.parameter.limit, 10) : undefined;
+    const offset = e.parameter.offset ? parseInt(e.parameter.offset, 10) : undefined;
+    const result = getTasks(filters, limit, offset);
+    return addCorsHeaders(
+      ContentService
+        .createTextOutput(JSON.stringify(result))
+        .setMimeType(ContentService.MimeType.JSON)
+    );
+  } else if (action === 'get') {
+    const taskId = e.parameter.id;
+    if (!taskId) {
+      return addCorsHeaders(
+        ContentService
+          .createTextOutput(JSON.stringify({ error: 'Task ID is required' }))
+          .setMimeType(ContentService.MimeType.JSON)
+      );
+    }
+    const tasks = getTasks({}, 1); // get all then filter
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) {
+      return addCorsHeaders(
+        ContentService
+          .createTextOutput(JSON.stringify({ error: 'Task not found' }))
+          .setMimeType(ContentService.MimeType.JSON)
+      );
+    }
+    return addCorsHeaders(
+      ContentService
+        .createTextOutput(JSON.stringify(task))
+        .setMimeType(ContentService.MimeType.JSON)
+    );
+  } else {
+    // Unknown action
+    return addCorsHeaders(
+      ContentService
+        .createTextOutput(JSON.stringify({ error: 'Unknown action' }))
+        .setMimeType(ContentService.MimeType.JSON)
+    );
+  }
+}
+
+/**
+ * Handles POST requests.
+ * Supported actions:
+ *   action=validate   -> verify password, set cookie via JS redirect
+ *   (no action)       -> create a new task (multipart/form-data)
+ *   action=update&id= -> update a task (JSON body)
+ * @param {Object} e The event parameter.
+ * @return {string} JSON or HTML response.
+ */
+function doPost(e) {
+  // If the request is for validation, handle it without auth check
+  if (e.parameter && e.parameter.action === 'validate') {
+    const password = e.parameter.password;
+    const correct = getLoginPassword();
+    if (!correct) {
+      return addCorsHeaders(
+        ContentService
+          .createTextOutput(JSON.stringify({ error: 'Login password not set. Please run setLoginPassword() in the script editor.' }))
+          .setMimeType(ContentService.MimeType.JSON)
+      );
+    }
+    if (password === correct) {
+      const token = createToken();
+      storeToken(token);
+      // Return HTML that sets cookie and redirects to frontend
+      return addCorsHeadersHtml(
+        HtmlService.createHtmlOutput(`
+          <!DOCTYPE html>
+          <html>
+            <head><meta charset="UTF-8"></head>
+            <body>
+              <script>
+                // Set cookie (httpOnly cannot be set from JS, but we can set regular cookie)
+                document.cookie = "pwa_auth=" + "${token}" + "; path=/; max-age=${15*60}; SameSite=Lax";
+                // Redirect to frontend
+                window.location.href = "' + getFrontendUrl() + '";
+              </script>
+            </body>
+          </html>
+        `)
+      );
+    } else {
+      return addCorsHeaders(
+        ContentService
+          .createTextOutput(JSON.stringify({ error: 'Ongeldig wachtwoord' }))
+          .setMimeType(ContentService.MimeType.JSON)
+      );
+    }
+  }
+
+  // For all other POST actions, require authentication
+  if (!checkAuth(e)) {
+    return authError();
+  }
+
+  const action = e.parameter.action;
+  if (action === 'update') {
+    const taskId = e.parameter.id;
+    if (!taskId) {
+      return addCorsHeaders(
+        ContentService
+          .createTextOutput(JSON.stringify({ error: 'Task ID is required for update' }))
+          .setMimeType(ContentService.MimeType.JSON)
+      );
+    }
+    const postData = e.postData.contents;
+    let updates;
+    try {
+      updates = JSON.parse(postData);
+    } catch (parseError) {
+      return addCorsHeaders(
+        ContentService
+          .createTextOutput(JSON.stringify({ error: 'Invalid JSON in request body' }))
+          .setMimeType(ContentService.MimeType.JSON)
+      );
+    }
+    const success = updateTask(taskId, updates);
+    if (!success) {
+      return addCorsHeaders(
+        ContentService
+          .createTextOutput(JSON.stringify({ error: 'Task not found' }))
+          .setMimeType(ContentService.MimeType.JSON)
+      );
+    }
+    return addCorsHeaders(
+      ContentService
+        .createTextOutput(JSON.stringify({ success: true }))
+        .setMimeType(ContentService.MimeType.JSON)
+    );
+  } else {
+    // Create a new task (multipart/form-data)
+    const description = e.parameter.description || '';
+    const requester_name = e.parameter.requester_name || '';
+    const location = e.parameter.location || '';
+    const required_materials = e.parameter.required_materials || '';
+    const urgency = e.parameter.urgency || 'Normal';
+    const status = e.parameter.status || 'New';
+
+    let photoUrls = [];
+    if (e.parameter.file) {
+      const blob = e.parameter.file;
+      const photoFolder = getPhotoFolder();
+      const file = photoFolder.createFile(blob);
+      const fileUrl = file.getUrl();
+      photoUrls.push(fileUrl);
+    }
+
+    const taskData = {
+      description: description,
+      requester_name: requester_name,
+      location: location,
+      required_materials: required_materials,
+      urgency: urgency,
+      status: status,
+      photo_urls: photoUrls.join(','),
+      maintenance_notes: '',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      completed_at: ''
+    };
+
+    return addCorsHeaders(
+      ContentService
+        .createTextOutput(JSON.stringify({ success: true, taskId: createTask(taskData) }))
+        .setMimeType(ContentService.MimeType.JSON)
+    );
+  }
+}
+
+/**
+ * Function to set up the maintenance worker e‑mail (for initial setup).
+ * @param {string} email - The maintenance worker e‑mail address.
+ */
+function setMaintenanceWorker(email) {
+  PropertiesService.getScriptProperties().setProperty(MAINTENANCE_WORKER_PROPERTY, email);
+}
+
+/**
+ * Function to create a new quarter sheet and copy unfinished tasks.
+ * This would be called manually or via a trigger.
+ */
+function createNewQuarterSheet() {
+  const ss = SpreadsheetApp.openById(TARGET_SPREADSHEET_ID);
+  const today = new Date();
+  const day = String(today.getDate()).padStart(2, '0');
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const year = today.getFullYear();
+  const sheetName = `klusjes ${day}${month}${year}`;
+
+  // Check if a sheet with this name already exists
+  const existingSheet = ss.getSheetByName(sheetName);
+  if (existingSheet) {
+    return; // Sheet already exists for today
+  }
+
+  // Create new sheet
+  const newSheet = ss.insertSheet(sheetName);
+  const headers = [
+    'Omschrijving',
+    'naam aanvrager',
+    'Welke klas? Welk lokaal?',
+    'Benodigd materiaal',
+    'prioriteit',
+    'opvolging',
+    'photo_urls',
+    'Opmerkingen',
+    'datum gemaakt',
+    'datum update',
+    'datum opgelost',
+    'task_id'
+  ];
+  newSheet.appendRow(headers);
+
+  // Get the most recent previous sheet (excluding the new one we just created)
+  const sheets = ss.getSheets();
+  let previousSheet = null;
+  let latestDate = null;
+
+  for (const sheet of sheets) {
+    const name = sheet.getName();
+    if (name === sheetName) continue; // skip the new sheet
+    if (SHEET_NAME_PATTERN.test(name)) {
+      const dateStr = name.substring(8);
+      const day = parseInt(dateStr.substring(0, 2), 10);
+      const month = parseInt(dateStr.substring(2, 4), 10);
+      const year = parseInt(dateStr.substring(4, 8), 10);
+      const date = new Date(year, month - 1, day);
+      if (!latestDate || date > latestDate) {
+        latestDate = date;
+        previousSheet = sheet;
+      }
+    }
+  }
+
+  if (previousSheet) {
+    // Copy unfinished tasks from previous sheet to new sheet
+    const previousData = previousSheet.getDataRange().getValues();
+    const previousHeaders = previousData[0];
+    const opvolgingColIndex = previousHeaders.indexOf('opvolging');
+    if (opvolgingColIndex === -1) {
+      // If we can't find opvolging, copy all rows (skip header)
+      for (let i = 1; i < previousData.length; i++) {
+        newSheet.appendRow(previousData[i]);
+      }
+    } else {
+      for (let i = 1; i < previousData.length; i++) {
+        const row = previousData[i];
+        const opvolging = row[opvolgingColIndex];
+        const status = mapOpvolgingToStatus(opvolging);
+        if (status !== 'Completed') {
+          newSheet.appendRow(row);
+        }
+      }
+    }
+  }
 }
 
 /**
@@ -174,137 +654,14 @@ function mapStatusToOpvolging(status) {
     case 'Planned':
       return 'overnemen op volgend lijstje';
     case 'In progress':
-      // We'll use 'niet voldoende gebeurd' for in progress, but note that the existing
-      // 'bezig of in pauze; met extern bedrijf of MAARTEN' also maps to in progress.
-      // For simplicity, we'll use 'niet voldoende gebeurd' when setting to in progress.
+      // We'll use 'niet voldoende gebeurd' for in progress.
       return 'niet voldoende gebeurd';
     case 'Waiting for materials':
-      // There's no direct mapping, we'll use a custom value or leave as is? 
-      // Since the existing opvolging doesn't have this, we'll store a custom string.
-      // We'll use 'wachten op materialen' (Dutch for waiting for materials).
-      return 'wachten op materialen';
+      return 'wachten op materialen'; // custom Dutch string
     case 'New':
     default:
       return ''; // empty for new
   }
-}
-
-/**
- * Creates a new task in the sheet.
- * @param {Object} taskData - The task data (description, requester_name, location, required_materials, urgency, status, photo_urls, maintenance_notes).
- * @return {string} The task ID of the created task.
- */
-function createTask(taskData) {
-  const sheet = getActiveSheet();
-  const taskId = Utilities.getUuid(); // Generate a UUID
-
-  // Prepare the row data according to the column indices
-  const rowData = [
-    taskData.description || '',                           // 0: Omschrijving
-    taskData.requester_name || '',                        // 1: naam aanvrager
-    taskData.location || '',                              // 2: Welke klas? Welk lokaal?
-    taskData.required_materials || '',                    // 3: Benodigd materiaal
-    mapUrgencyToPriority(taskData.urgency) || '',         // 4: prioriteit
-    mapStatusToOpvolging(taskData.status) || '',          // 5: opvolging
-    taskData.photo_urls || '',                            // 6: photo_urls (new)
-    taskData.maintenance_notes || '',                     // 7: Opmerkingen
-    taskData.created_at || new Date().toISOString(),      // 8: datum gemaakt
-    taskData.updated_at || new Date().toISOString(),      // 9: datum update
-    taskData.completed_at || ''                           // 10: datum opgelost
-  ];
-
-  // Append the task ID as an additional column (column 11)
-  rowData.push(taskId); // column 11: task_id
-
-  sheet.appendRow(rowData);
-
-  return taskId;
-}
-
-/**
- * Updates a task in the sheet by its task ID.
- * @param {string} taskId - The task ID to update.
- * @param {Object} updates - The fields to update.
- * @return {boolean} True if the task was found and updated.
- */
-function updateTask(taskId, updates) {
-  const sheet = getActiveSheet();
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0];
-
-  // Find the column index for task ID (we added it as column 11, index 11 in 0-based array)
-  const taskIdColIndex = headers.indexOf('task_id');
-  if (taskIdColIndex === -1) {
-    // If we don't have a task_id column, we cannot update by task ID.
-    // For MVP, we might need to add it. But let's assume we have it.
-    // We'll add it in the header if missing.
-    // Alternatively, we can use the row number as a temporary ID, but we said not to.
-    // Let's add the task_id header if it doesn't exist.
-    if (taskIdColIndex === -1) {
-      sheet.getRange(1, headers.length + 1).setValue('task_id');
-      headers.push('task_id');
-      taskIdColIndex = headers.length - 1;
-    }
-  }
-
-  // Find the row with the matching task ID
-  let rowIndex = -1;
-  for (let i = 1; i < data.length; i++) { // start from 1 to skip header
-    if (data[i][taskIdColIndex] === taskId) {
-      rowIndex = i;
-      break;
-    }
-  }
-
-  if (rowIndex === -1) {
-    return false; // Task not found
-  }
-
-  // Prepare the row update
-  const rowData = data[rowIndex];
-  // Update the fields that are present in updates
-  if (updates.description !== undefined) {
-    rowData[0] = updates.description; // Omschrijving
-  }
-  if (updates.requester_name !== undefined) {
-    rowData[1] = updates.requester_name; // naam aanvrager
-  }
-  if (updates.location !== undefined) {
-    rowData[2] = updates.location; // Welke klas? Welk lokaal?
-  }
-  if (updates.required_materials !== undefined) {
-    rowData[3] = updates.required_materials; // Benodigd materiaal
-  }
-  if (updates.urgency !== undefined) {
-    rowData[4] = mapUrgencyToPriority(updates.urgency); // prioriteit
-  }
-  if (updates.status !== undefined) {
-    rowData[5] = mapStatusToOpvolging(updates.status); // opvolging
-  }
-  if (updates.photo_urls !== undefined) {
-    rowData[6] = updates.photo_urls; // photo_urls
-  }
-  if (updates.maintenance_notes !== undefined) {
-    rowData[7] = updates.maintenance_notes; // Opmerkingen
-  }
-  if (updates.created_at !== undefined) {
-    rowData[8] = updates.created_at; // datum gemaakt
-  }
-  if (updates.updated_at !== undefined) {
-    rowData[9] = updates.updated_at; // datum update
-  } else {
-    // Always update the updated_at timestamp when any update occurs
-    rowData[9] = new Date().toISOString();
-  }
-  if (updates.completed_at !== undefined) {
-    rowData[10] = updates.completed_at; // datum opgelost
-  }
-  // The task ID should not change, so we leave column 11 as is.
-
-  // Update the row in the sheet
-  sheet.getRange(rowIndex + 1, 1, 1, rowData.length).setValues([rowData]);
-
-  return true;
 }
 
 /**
@@ -319,7 +676,6 @@ function getTasks(filters, limit, offset) {
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
 
-  // We expect the headers to be as we set them, including 'task_id' at the end.
   // Map header names to column indices for easy access.
   const headerIndices = {};
   headers.forEach((header, index) => {
@@ -374,7 +730,7 @@ function getTasks(filters, limit, offset) {
       requester_name: task['naam aanvrager'] || '',
       location: task['Welke klas? Welk lokaal?'] || '',
       required_materials: task['Benodigd materiaal'] || '',
-      urgency: mapPriorityToUrgency(task.prioriteit) || 'Normal',
+      urgency: mapPriorityToUrgency(task.prioritet) || 'Normal',
       status: mapOpvolgingToStatus(task.opvolging) || 'New',
       photo_urls: task.photo_urls ? task.photo_urls.split(',').filter(url => url.trim() !== '') : [],
       maintenance_notes: task.Opmerkingen || '',
@@ -386,271 +742,15 @@ function getTasks(filters, limit, offset) {
 }
 
 /**
- * Handles GET requests.
- * Supported actions:
- *   ?action=list&status=...&urgency=...&location=...&limit=...&offset=...
- *   ?action=get&id=...
- * If no action is provided, defaults to list.
- * @param {Object} e The event parameter.
- * @return {string} JSON response.
+ * Initialization helper – run once to set the maintenance worker, login password, and frontend URL.
+ * After running, the values will be stored in Script Properties.
  */
-function doGet(e) {
-  try {
-    const action = e.parameter.action || 'list';
-    let result;
-
-    if (action === 'list') {
-      const filters = {};
-      if (e.parameter.status) filters.status = e.parameter.status;
-      if (e.parameter.urgency) filters.urgency = e.parameter.urgency;
-      if (e.parameter.location) filters.location = e.parameter.location;
-      const limit = e.parameter.limit ? parseInt(e.parameter.limit, 10) : undefined;
-      const offset = e.parameter.offset ? parseInt(e.parameter.offset, 10) : undefined;
-      result = getTasks(filters, limit, offset);
-    } else if (action === 'get') {
-      const taskId = e.parameter.id;
-      if (!taskId) {
-        return ContentService
-          .createTextOutput(JSON.stringify({ error: 'Task ID is required' }))
-          .setMimeType(ContentService.MimeType.JSON);
-      }
-      const tasks = getTasks({}, 1); // We'll get all and then filter by ID? Not efficient but okay for MVP.
-      const task = tasks.find(t => t.id === taskId);
-      if (!task) {
-        return ContentService
-          .createTextOutput(JSON.stringify({ error: 'Task not found' }))
-          .setMimeType(ContentService.MimeType.JSON);
-      }
-      result = task;
-    } else {
-      return ContentService
-        .createTextOutput(JSON.stringify({ error: 'Unknown action' }))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-
-    return ContentService
-      .createTextOutput(JSON.stringify(result))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch (error) {
-    return ContentService
-      .createTextOutput(JSON.stringify({ error: error.toString() }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-/**
- * Handles POST requests.
- * Supported actions:
- *   (no action) - create a new task (expects multipart/form-data with fields and optional files)
- *   ?action=update&id=... - update a task (expects JSON body with the fields to update)
- * @param {Object} e The event parameter.
- * @return {string} JSON response.
- */
-function doPost(e) {
-  try {
-    const action = e.parameter.action;
-    if (action === 'update') {
-      // Update an existing task
-      const taskId = e.parameter.id;
-      if (!taskId) {
-        return ContentService
-          .createTextOutput(JSON.stringify({ error: 'Task ID is required for update' }))
-          .setMimeType(ContentService.MimeType.JSON);
-      }
-
-      // Parse the JSON body
-      const postData = e.postData.contents;
-      let updates;
-      try {
-        updates = JSON.parse(postData);
-      } catch (parseError) {
-        return ContentService
-          .createTextOutput(JSON.stringify({ error: 'Invalid JSON in request body' }))
-          .setMimeType(ContentService.MimeType.JSON);
-      }
-
-      const success = updateTask(taskId, updates);
-      if (!success) {
-        return ContentService
-          .createTextOutput(JSON.stringify({ error: 'Task not found' }))
-          .setMimeType(ContentService.MimeType.JSON);
-      }
-
-      return ContentService
-        .createTextOutput(JSON.stringify({ success: true }))
-        .setMimeType(ContentService.MimeType.JSON);
-    } else {
-      // Create a new task
-      // Expect multipart/form-data
-      const description = e.parameter.description || '';
-      const requester_name = e.parameter.requester_name || '';
-      const location = e.parameter.location || '';
-      const required_materials = e.parameter.required_materials || '';
-      const urgency = e.parameter.urgency || 'Normal';
-      const status = e.parameter.status || 'New';
-
-      // Handle file uploads
-      let photoUrls = [];
-      // The number of uploaded files is in e.parameter.filecount or we can iterate over e.parameter
-      // But note: when there are file uploads, the files are in e.parameter as blobs with keys like 'file1', 'file2', etc.
-      // Alternatively, we can use e.parameter.fileName and e.file.getBlob() but it's tricky.
-      // Let's assume we have a single file upload for simplicity (the staff interface only allows one photo for now).
-      // We'll look for a parameter that starts with 'file' or check if e.parameter has a fileName.
-      // Actually, the easiest way is to check if e.parameter has a key that is not one of the known fields.
-      // We'll do a simple approach: if there is a parameter named 'file', we treat it as a blob.
-      // But the HTML form uses <input type="file" name="file">? We'll set the name to 'file' in the form.
-
-      // Let's check for a parameter named 'file'
-      if (e.parameter.file) {
-        // This is a blob
-        const blob = e.parameter.file;
-        // For MVP, we'll upload all photos to the main folder and store the URL.
-        // We'll generate a unique filename to avoid conflicts.
-        const photoFolder = getPhotoFolder();
-        const file = photoFolder.createFile(blob);
-        const fileUrl = file.getUrl();
-        photoUrls.push(fileUrl);
-        
-        // Now create the task with the photo URL
-        const taskData = {
-          description: description,
-          requester_name: requester_name,
-          location: location,
-          required_materials: required_materials,
-          urgency: urgency,
-          status: status,
-          photo_urls: photoUrls.join(','),
-          maintenance_notes: '',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          completed_at: ''
-        };
-        
-        return ContentService
-          .createTextOutput(JSON.stringify({ success: true, taskId: createTask(taskData) }))
-          .setMimeType(ContentService.MimeType.JSON);
-      } else {
-        // No file uploaded
-        const taskData = {
-          description: description,
-          requester_name: requester_name,
-          location: location,
-          required_materials: required_materials,
-          urgency: urgency,
-          status: status,
-          photo_urls: '',
-          maintenance_notes: '',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          completed_at: ''
-        };
-        
-        return ContentService
-          .createTextOutput(JSON.stringify({ success: true, taskId: createTask(taskData) }))
-          .setMimeType(ContentService.MimeType.JSON);
-      }
-    }
-  } catch (error) {
-    return ContentService
-      .createTextOutput(JSON.stringify({ error: error.toString() }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-/**
- * Function to set up maintenance workers (for initial setup).
- * @param {string} emails - Comma-separated list of emails.
- */
-function setMaintenanceWorkers(emails) {
-  PropertiesService.getScriptProperties().setProperty(MAINTENANCE_WORKER_PROPERTY, emails);
-}
-
-/**
- * Function to create a new quarter sheet and copy unfinished tasks.
- * This would be called manually or via a trigger.
- */
-function createNewQuarterSheet() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const today = new Date();
-  const day = String(today.getDate()).padStart(2, '0');
-  const month = String(today.getMonth() + 1).padStart(2, '0');
-  const year = today.getFullYear();
-  const sheetName = `klusjes ${day}${month}${year}`;
-
-  // Check if a sheet with this name already exists
-  const existingSheet = ss.getSheetByName(sheetName);
-  if (existingSheet) {
-    return; // Sheet already exists for today
-  }
-
-  // Create new sheet
-  const newSheet = ss.insertSheet(sheetName);
-  // Set up headers (same as before)
-  const headers = [
-    'Omschrijving',
-    'naam aanvrager',
-    'Welke klas? Welk lokaal?',
-    'Benodigd materiaal',
-    'prioriteit',
-    'opvolging',
-    'photo_urls',
-    'Opmerkingen',
-    'datum gemaakt',
-    'datum update',
-    'datum opgelost',
-    'task_id'
-  ];
-  newSheet.appendRow(headers);
-
-  // Get the most recent previous sheet (excluding the new one we just created)
-  const sheets = ss.getSheets();
-  let previousSheet = null;
-  let latestDate = null;
-
-  for (const sheet of sheets) {
-    const name = sheet.getName();
-    if (name === sheetName) {
-      continue; // skip the new sheet
-    }
-    if (SHEET_NAME_PATTERN.test(name)) {
-      const dateStr = name.substring(8);
-      const day = parseInt(dateStr.substring(0, 2), 10);
-      const month = parseInt(dateStr.substring(2, 4), 10);
-      const year = parseInt(dateStr.substring(4, 8), 10);
-      const date = new Date(year, month - 1, day);
-      if (!latestDate || date > latestDate) {
-        latestDate = date;
-        previousSheet = sheet;
-      }
-    }
-  }
-
-  if (previousSheet) {
-    // Copy unfinished tasks from previous sheet to new sheet
-    const previousData = previousSheet.getDataRange().getValues();
-    const previousHeaders = previousData[0];
-    // We need to map the previous sheet's columns to the new sheet's columns.
-    // Since the headers are the same, we can copy the rows directly.
-    // But we need to skip the header and only copy rows where status is not 'Completed'
-    // We'll determine the status by looking at the 'opvolging' column (index 5) and mapping.
-    const opvolgingColIndex = previousHeaders.indexOf('opvolging');
-    if (opvolgingColIndex === -1) {
-      // If we can't find opvolging, we'll copy all rows (skip header)
-      for (let i = 1; i < previousData.length; i++) {
-        newSheet.appendRow(previousData[i]);
-      }
-    } else {
-      for (let i = 1; i < previousData.length; i++) {
-        const row = previousData[i];
-        const opvolging = row[opvolgingColIndex];
-        const status = mapOpvolgingToStatus(opvolging);
-        if (status !== 'Completed') {
-          // We need to reset the timestamps? Or keep them as is?
-          // We'll keep the original created_at, but update the updated_at to now? 
-          // For simplicity, we'll keep the existing values and let the maintenance worker update them.
-          newSheet.appendRow(row);
-        }
-      }
-    }
-  }
+function initialize() {
+  // Set the maintenance worker as requested
+  setMaintenanceWorker('maartenderyck@sint-albertschool.be');
+  // Set a default login password – change this to your desired password
+  setLoginPassword('Welkom123!');
+  // Set the frontend URL (GitHub Pages) – adjust if your repo/branch differs
+  setFrontendUrl('https://mdr-be.github.io/school-maintenance-reporter-pwa/');
+  Logger.log('Initialization complete.');
 }

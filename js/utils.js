@@ -8,7 +8,7 @@
 function getApiBaseUrl() {
   // TODO: Replace with the actual web app URL after deployment
   // For now, we'll return a placeholder; the user must update this.
-  return 'https://script.google.com/a/macros/sint-albertschool.be/s/AKfycbyIeSnZh1A-5TAYo_ovkpMU-qEIc2XdroqDRRGy-y30r7C8I_U4B8nILcpX4xup2hxJ/exec';
+  return 'https://script.google.com/macros/s/AKfycbzMkGKr9zHiHBPKmYEiHPk80IHRGQ-RyZzaVo5u3aBp9VFzXVvrBV-xFK8K4BaRa-qk/exec';
 }
 
 /**

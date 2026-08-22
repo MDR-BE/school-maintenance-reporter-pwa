@@ -50,6 +50,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const apiUrl = getApiBaseUrl(); // from utils.js
         const response = await fetch(apiUrl, {
           method: 'POST',
+          credentials: 'include',
           body: formData
         });
 

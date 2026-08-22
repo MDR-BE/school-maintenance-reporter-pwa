@@ -54,22 +54,13 @@ async function loadTasks() {
   taskDetailContainer.classList.add('hidden');
 
   try {
-    const apiUrl = getApiBaseUrl();
-    const queryParams = new URLSearchParams();
-    if (status) queryParams.append('status', status);
-    if (urgency) queryParams.append('urgency', urgency);
-    if (location) queryParams.append('location', location);
-    queryParams.append('limit', '100'); // reasonable limit
+    const filters = {};
+    if (status) filters.status = status;
+    if (urgency) filters.urgency = urgency;
+    if (location) filters.location = location;
 
-    const response = await fetch(`${apiUrl}?action=list&${queryParams.toString()}`);
-    const result = await response.json();
-
-    if (response.ok) {
-      currentTasks = result;
-      renderTaskList();
-    } else {
-      throw new Error(result.error || 'Failed to load tasks');
-    }
+    currentTasks = await fetchTasks(filters, 100, 0);
+    renderTaskList();
   } catch (error) {
     console.error('Error loading tasks:', error);
     taskListLoading.textContent = 'Failed to load tasks. Please try again.';
@@ -270,7 +261,7 @@ async function showTaskDetail(task) {
   completeBtn.textContent = task.status === 'Completed' ? 'Reopen' : 'Mark as Completed';
   completeBtn.addEventListener('click', () => {
     if (task.status === 'Completed') {
-      updateTaskStatus(task.id, 'New'); // or maybe 'In progress'? We'll use 'New' for simplicity.
+      updateTaskStatus(task.id, 'New');
     } else {
       updateTaskStatus(task.id, 'Completed');
     }
@@ -339,7 +330,8 @@ function showStatusUpdateModal(task) {
         closeModal();
         loadTasks(); // refresh the list
         if (!taskDetailContainer.classList.contains('hidden') && currentTaskId === task.id) {
-          showTaskDetail(await getTaskById(task.id)); // refresh detail
+          const updatedTask = await getTaskById(task.id);
+          showTaskDetail(updatedTask); // refresh detail
         }
       }, 1500);
     } catch (error) {
@@ -395,7 +387,8 @@ function showNotesModal(task) {
         closeModal();
         loadTasks(); // refresh the list
         if (!taskDetailContainer.classList.contains('hidden') && currentTaskId === task.id) {
-          showTaskDetail(await getTaskById(task.id)); // refresh detail
+          const updatedTask = await getTaskById(task.id);
+          showTaskDetail(updatedTask); // refresh detail
         }
       }, 1500);
     } catch (error) {
@@ -450,24 +443,7 @@ function showPhotosModal(task) {
  * @return {Promise} Promise that resolves when the update is complete.
  */
 async function updateTaskStatus(taskId, newStatus) {
-  const apiUrl = getApiBaseUrl();
-  const response = await fetch(apiUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      action: 'update',
-      id: taskId,
-      status: newStatus
-    })
-  });
-
-  const result = await response.json();
-  if (!response.ok || !result.success) {
-    throw new Error(result.error || 'Failed to update status');
-  }
-  return result;
+  return updateTask(taskId, { status: newStatus });
 }
 
 /**
@@ -477,24 +453,7 @@ async function updateTaskStatus(taskId, newStatus) {
  * @return {Promise} Promise that resolves when the update is complete.
  */
 async function updateTaskNotes(taskId, notes) {
-  const apiUrl = getApiBaseUrl();
-  const response = await fetch(apiUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      action: 'update',
-      id: taskId,
-      maintenance_notes: notes
-    })
-  });
-
-  const result = await response.json();
-  if (!response.ok || !result.success) {
-    throw new Error(result.error || 'Failed to save notes');
-  }
-  return result;
+  return updateTask(taskId, { maintenance_notes: notes });
 }
 
 /**
@@ -503,11 +462,5 @@ async function updateTaskNotes(taskId, notes) {
  * @return {Promise<Object>} The task.
  */
 async function getTaskById(taskId) {
-  const apiUrl = getApiBaseUrl();
-  const response = await fetch(`${apiUrl}?action=get&id=${taskId}`);
-  const result = await response.json();
-  if (!response.ok) {
-    throw new Error(result.error || 'Failed to get task');
-  }
-  return result;
+  return fetchTask(taskId);
 }

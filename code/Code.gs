@@ -486,27 +486,53 @@ function doPost(e) {
     );
   } else {
     // Create a new task (multipart/form-data)
-    const description = e.parameter.description || '';
-    const requester_name = e.parameter.requester_name || '';
-    const location = e.parameter.location || '';
-    const required_materials = e.parameter.required_materials || '';
-    const urgency = e.parameter.urgency || 'Normal';
-    const status = e.parameter.status || 'New';
-
+    // Apps Script doesn't automatically parse multipart/form-data, so we need to parse it manually
+    let description = '';
+    let requester_name = '';
+    let location = '';
+    let required_materials = '';
+    let urgency = 'Normal';
+    let status = 'New';
     let photoUrls = [];
-    // Handle file upload - Apps Script puts uploaded files in e.parameter with the field name
-    // The file comes as a Blob object
-    const uploadedFile = e.parameter.file;
-    if (uploadedFile && uploadedFile.getBytes) {
-      try {
-        const photoFolder = getPhotoFolder();
-        const file = photoFolder.createFile(uploadedFile);
-        const fileUrl = file.getUrl();
-        photoUrls.push(fileUrl);
-      } catch (fileError) {
-        console.error('Error uploading photo:', fileError);
-        // Continue without photo if upload fails
+
+    // Parse multipart/form-data from e.postData.contents
+    const contentType = e.postData.type || '';
+    const postData = e.postData.contents;
+    
+    if (contentType.includes('multipart/form-data') && postData) {
+      // Parse multipart form data
+      const boundary = contentType.split('boundary=')[1];
+      if (boundary) {
+        const parts = parseMultipartData(postData, boundary);
+        
+        description = parts.description || '';
+        requester_name = parts.requester_name || '';
+        location = parts.location || '';
+        required_materials = parts.required_materials || '';
+        urgency = parts.urgency || 'Normal';
+        status = parts.status || 'New';
+        
+        // Handle file upload
+        if (parts.file && parts.file.blob) {
+          try {
+            const photoFolder = getPhotoFolder();
+            const file = photoFolder.createFile(parts.file.blob);
+            const fileUrl = file.getUrl();
+            photoUrls.push(fileUrl);
+          } catch (fileError) {
+            console.error('Error uploading photo:', fileError);
+            // Continue without photo if upload fails
+          }
+        }
       }
+    } else {
+      // Fallback to URL-encoded parameters (for backward compatibility)
+      description = e.parameter.description || '';
+      requester_name = e.parameter.requester_name || '';
+      location = e.parameter.location || '';
+      required_materials = e.parameter.required_materials || '';
+      urgency = e.parameter.urgency || 'Normal';
+      status = e.parameter.status || 'New';
     }
 
     const taskData = {
@@ -529,6 +555,54 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.JSON)
     );
   }
+}
+
+/**
+ * Parses multipart/form-data content.
+ * @param {string} data - The raw multipart content.
+ * @param {string} boundary - The multipart boundary.
+ * @return {Object} Parsed fields and file.
+ */
+function parseMultipartData(data, boundary) {
+  const result = {};
+  const delimiter = '--' + boundary;
+  const parts = data.split(delimiter);
+  
+  for (const part of parts) {
+    if (part.trim() === '' || part.trim() === '--') continue;
+    
+    const headerEnd = part.indexOf('\r\n\r\n');
+    if (headerEnd === -1) continue;
+    
+    const headers = part.substring(0, headerEnd);
+    const content = part.substring(headerEnd + 4); // +4 for \r\n\r\n
+    // Remove trailing \r\n
+    const cleanContent = content.replace(/\r\n$/, '');
+    
+    // Parse Content-Disposition header
+    const dispositionMatch = headers.match(/name="([^"]+)"/);
+    if (!dispositionMatch) continue;
+    
+    const fieldName = dispositionMatch[1];
+    
+    // Check if it's a file
+    const filenameMatch = headers.match(/filename="([^"]+)"/);
+    
+    if (filenameMatch) {
+      // It's a file - convert string content to blob
+      // The content is a binary string, we need to convert it
+      const blob = Utilities.newBlob(cleanContent, 'application/octet-stream', filenameMatch[1]);
+      result.file = {
+        name: filenameMatch[1],
+        blob: blob
+      };
+    } else {
+      // Regular form field
+      result[fieldName] = cleanContent;
+    }
+  }
+  
+  return result;
 }
 
 /**

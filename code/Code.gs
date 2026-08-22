@@ -60,7 +60,8 @@ function getActiveSheet() {
       'Opmerkingen',            // 7 (existing)
       'datum gemaakt',          // 8 (existing)
       'datum update',           // 9 (existing)
-      'datum opgelost'          // 10 (existing)
+      'datum opgelost',         // 10 (existing)
+      'task_id'                 // 11
     ];
     activeSheet.appendRow(headers);
   }
@@ -70,16 +71,22 @@ function getActiveSheet() {
 
 /**
  * Returns the Google Drive folder for storing photos.
- * Creates it if it doesn't exist.
+ * Uses folder ID from script properties, creates if not exists.
  * @return {GoogleAppsScript.Drive.Folder} The photo folder.
  */
 function getPhotoFolder() {
-  const folders = DriveApp.getFoldersByName(PHOTO_FOLDER_NAME);
-  if (folders.hasNext()) {
-    return folders.next();
+  const folderId = PropertiesService.getScriptProperties().getProperty('photo_folder_id');
+  if (folderId) {
+    try {
+      return DriveApp.getFolderById(folderId);
+    } catch (e) {
+      // Folder was deleted, create new one
+    }
   }
-  // Folder doesn't exist, create it
-  return DriveApp.createFolder(PHOTO_FOLDER_NAME);
+  // Folder doesn't exist or was deleted, create it
+  const folder = DriveApp.createFolder(PHOTO_FOLDER_NAME);
+  PropertiesService.getScriptProperties().setProperty('photo_folder_id', folder.getId());
+  return folder;
 }
 
 /**
@@ -485,8 +492,19 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.JSON)
     );
   } else {
-    // Create a new task (multipart/form-data)
-    // Apps Script doesn't automatically parse multipart/form-data, so we need to parse it manually
+    // Create a new task (JSON with base64-encoded photos)
+    // Expected JSON format:
+    // {
+    //   description: "...",
+    //   requester_name: "...",
+    //   location: "...",
+    //   required_materials: "...",
+    //   urgency: "Normal",
+    //   status: "New",
+    //   photos: [
+    //     { filename: "photo.jpg", mimeType: "image/jpeg", base64: "..." }
+    //   ]
+    // }
     let description = '';
     let requester_name = '';
     let location = '';
@@ -495,35 +513,44 @@ function doPost(e) {
     let status = 'New';
     let photoUrls = [];
 
-    // Parse multipart/form-data from e.postData.contents
     const contentType = e.postData.type || '';
     const postData = e.postData.contents;
-    
-    if (contentType.includes('multipart/form-data') && postData) {
-      // Parse multipart form data
-      const boundary = contentType.split('boundary=')[1];
-      if (boundary) {
-        const parts = parseMultipartData(postData, boundary);
+
+    if (contentType.includes('application/json') && postData) {
+      try {
+        const data = JSON.parse(postData);
         
-        description = parts.description || '';
-        requester_name = parts.requester_name || '';
-        location = parts.location || '';
-        required_materials = parts.required_materials || '';
-        urgency = parts.urgency || 'Normal';
-        status = parts.status || 'New';
-        
-        // Handle file upload
-        if (parts.file && parts.file.blob) {
-          try {
-            const photoFolder = getPhotoFolder();
-            const file = photoFolder.createFile(parts.file.blob);
-            const fileUrl = file.getUrl();
-            photoUrls.push(fileUrl);
-          } catch (fileError) {
-            console.error('Error uploading photo:', fileError);
-            // Continue without photo if upload fails
+        description = data.description || '';
+        requester_name = data.requester_name || '';
+        location = data.location || '';
+        required_materials = data.required_materials || '';
+        urgency = data.urgency || 'Normal';
+        status = data.status || 'New';
+
+        // Handle base64-encoded photos
+        if (data.photos && Array.isArray(data.photos)) {
+          for (const photo of data.photos) {
+            if (photo.base64 && photo.mimeType && photo.filename) {
+              try {
+                const bytes = Utilities.base64Decode(photo.base64);
+                const blob = Utilities.newBlob(bytes, photo.mimeType, photo.filename);
+                const photoFolder = getPhotoFolder();
+                const file = photoFolder.createFile(blob);
+                const fileUrl = file.getUrl();
+                photoUrls.push(fileUrl);
+              } catch (fileError) {
+                console.error('Error uploading photo:', fileError);
+                // Continue without this photo if upload fails
+              }
+            }
           }
         }
+      } catch (parseError) {
+        return addCorsHeaders(
+          ContentService
+            .createTextOutput(JSON.stringify({ error: 'Invalid JSON in request body' }))
+            .setMimeType(ContentService.MimeType.JSON)
+        );
       }
     } else {
       // Fallback to URL-encoded parameters (for backward compatibility)
@@ -601,11 +628,10 @@ function parseMultipartData(data, boundary) {
       result[fieldName] = cleanContent;
     }
   }
-  
-  return result;
-}
 
-/**
+  }
+
+  /**
  * Function to create a new quarter sheet and copy unfinished tasks.
  * This would be called manually or via a trigger.
  */

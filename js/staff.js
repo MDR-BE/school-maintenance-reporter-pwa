@@ -40,17 +40,28 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       try {
-        // Prepare form data for submission (multipart/form-data for file upload)
-        const formData = new FormData();
-        formData.append('description', description);
-        formData.append('requester_name', requester_name);
-        formData.append('location', location);
-        formData.append('required_materials', required_materials);
-        formData.append('urgency', urgency);
-        formData.append('status', status);
+        // Prepare photos array for base64 upload
+        const photos = [];
         if (photoInput) {
-          formData.append('file', photoInput);
+          // Convert file to base64
+          const base64 = await fileToBase64(photoInput);
+          photos.push({
+            filename: photoInput.name,
+            mimeType: photoInput.type,
+            base64: base64
+          });
         }
+
+        // Prepare JSON data for submission
+        const taskData = {
+          description: description,
+          requester_name: requester_name,
+          location: location,
+          required_materials: required_materials,
+          urgency: urgency,
+          status: status,
+          photos: photos
+        };
 
         // Send to backend with auth token
         const apiUrl = getApiBaseUrl(); // from utils.js
@@ -63,7 +74,10 @@ document.addEventListener('DOMContentLoaded', () => {
         
         const response = await fetch(url.toString(), {
           method: 'POST',
-          body: formData
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(taskData)
         });
 
         const result = await response.json();
@@ -91,3 +105,21 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
+
+/**
+ * Convert a File object to base64 string
+ * @param {File} file - The file to convert
+ * @returns {Promise<string>} Base64 string (without data URL prefix)
+ */
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      // Remove the data URL prefix (e.g., "data:image/jpeg;base64,")
+      const base64 = reader.result.split(',')[1];
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}

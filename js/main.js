@@ -7,13 +7,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (staffBtn) {
     staffBtn.addEventListener('click', () => {
-      window.location.href = './staff.html';
+      window.location.href = './html/staff.html';
     });
   }
 
   if (workerBtn) {
     workerBtn.addEventListener('click', () => {
-      window.location.href = './worker.html';
+      window.location.href = './html/worker.html';
     });
   }
 

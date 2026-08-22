@@ -2,14 +2,13 @@
 const CACHE_NAME = 'maintenance-pwa-cache-v1';
 const urlsToCache = [
   './',
-  './index.html',
-  './staff.html',
-  './worker.html',
+  './html/index.html',
+  './html/staff.html',
+  './html/worker.html',
   './css/styles.css',
   './js/main.js',
   './js/staff.js',
   './js/worker.js',
-  './js/api.js',
   './js/utils.js',
   './manifest.json'
 ];

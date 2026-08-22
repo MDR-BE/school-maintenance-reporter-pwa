@@ -1,9 +1,9 @@
 // Staff interface logic for the Maintenance PWA
 
 document.addEventListener('DOMContentLoaded', () => {
-  const form = document.getElementById('report-form');
+  const form = document.getElementById('issueForm');
   const formMessage = document.getElementById('form-message');
-  const cancelBtn = document.getElementById('cancel-btn');
+  const cancelBtn = document.getElementById('cancelButton');
 
   if (cancelBtn) {
     cancelBtn.addEventListener('click', () => {
@@ -24,33 +24,45 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Collect form data
       const description = form.description.value.trim();
+      const requester_name = form.requester_name.value.trim();
       const location = form.location.value.trim();
+      const required_materials = form.required_materials.value.trim();
       const urgency = form.urgency.value;
+      const status = form.status.value;
       const photoInput = form.photo.files[0]; // File object
 
-      // Validate
-      if (!description || !location || !urgency) {
+      // Validate required fields
+      if (!description || !requester_name || !location || !urgency) {
         showMessage('form-message', 'Please fill in all required fields.', 'error');
         submitBtn.disabled = false;
-        submitBtn.textContent = 'Report Problem';
+        submitBtn.textContent = 'Issue melden';
         return;
       }
 
       try {
-        // Prepare form data for submission
+        // Prepare form data for submission (multipart/form-data for file upload)
         const formData = new FormData();
         formData.append('description', description);
+        formData.append('requester_name', requester_name);
         formData.append('location', location);
+        formData.append('required_materials', required_materials);
         formData.append('urgency', urgency);
+        formData.append('status', status);
         if (photoInput) {
           formData.append('file', photoInput);
         }
 
-        // Send to backend
+        // Send to backend with auth token
         const apiUrl = getApiBaseUrl(); // from utils.js
-        const response = await fetch(apiUrl, {
+        const token = getAuthToken(); // from auth.js
+        
+        const url = new URL(apiUrl);
+        if (token) {
+          url.searchParams.set('token', token);
+        }
+        
+        const response = await fetch(url.toString(), {
           method: 'POST',
-          credentials: 'include',
           body: formData
         });
 
@@ -74,11 +86,8 @@ document.addEventListener('DOMContentLoaded', () => {
         showMessage('form-message', 'Your report could not be sent. Please check your internet connection and try again.', 'error');
       } finally {
         submitBtn.disabled = false;
-        submitBtn.textContent = 'Report Problem';
+        submitBtn.textContent = 'Issue melden';
       }
     });
   }
 });
-
-// Helper function to hide message (defined in utils.js, but we can use it if loaded)
-// We assume utils.js is loaded before this script.

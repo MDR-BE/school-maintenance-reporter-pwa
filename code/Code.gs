@@ -154,9 +154,17 @@ function getFrontendOrigin() {
  * @return {ContentService.TextOutput} The output with CORS headers.
  */
 function addCorsHeaders(output) {
-  return output
-    .setHeader('Access-Control-Allow-Origin', getFrontendOrigin())
-    .setHeader('Access-Control-Allow-Credentials', 'true');
+  try {
+    // Validate that we have a valid output object with setHeader method
+    if (output && typeof output.setHeader === 'function') {
+      output.setHeader('Access-Control-Allow-Origin', getFrontendOrigin());
+      output.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+  } catch (e) {
+    // If something goes wrong, just return the output without headers
+    return output;
+  }
+  return output;
 }
 
 /**
@@ -165,10 +173,19 @@ function addCorsHeaders(output) {
  * @return {HtmlService.HtmlOutput} The output with CORS headers.
  */
 function addCorsHeadersHtml(output) {
-  return output
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
-    .setHeader('Access-Control-Allow-Origin', getFrontendOrigin())
-    .setHeader('Access-Control-Allow-Credentials', 'true');
+  try {
+    // Validate that we have a valid output object with required methods
+    if (output && typeof output.setXFrameOptionsMode === 'function' && 
+        typeof output.setHeader === 'function') {
+      output.setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+      output.setHeader('Access-Control-Allow-Origin', getFrontendOrigin());
+      output.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+  } catch (e) {
+    // If something goes wrong, just return the output without headers
+    return output;
+  }
+  return output;
 }
 
 /**
@@ -184,6 +201,9 @@ function createToken() {
  * @param {string} token - The token to store.
  */
 function storeToken(token) {
+  if (!token || typeof token !== 'string') {
+    throw new Error('Invalid token: must be a non-empty string');
+  }
   PropertiesService.getUserProperties().setProperty(token, Date.now().toString());
 }
 
@@ -203,6 +223,10 @@ function isValidToken(token) {
  * @param {string} token - The token to remove.
  */
 function removeToken(token) {
+  if (!token || typeof token !== 'string') {
+    // Invalid token, nothing to remove
+    return;
+  }
   PropertiesService.getUserProperties().deleteProperty(token);
 }
 
@@ -212,7 +236,8 @@ function removeToken(token) {
  * @return {string|null} The token if present, otherwise null.
  */
 function getAuthTokenFromRequest(e) {
-  if (!e.cookie) return null;
+  // Handle case where e or e.cookie is undefined
+  if (!e || !e.cookie) return null;
   const match = e.cookie.match(/(?:^|;)\s*pwa_auth=([^;]+)/);
   return match ? decodeURIComponent(match[1]) : null;
 }
@@ -224,7 +249,8 @@ function getAuthTokenFromRequest(e) {
  */
 function checkAuth(e) {
   const token = getAuthTokenFromRequest(e);
-  return token !== null && isValidToken(token);
+  if (token === null) return false;
+  return isValidToken(token);
 }
 
 /**
@@ -306,8 +332,8 @@ const LOGIN_PAGE = `
  * @return {string} JSON or HTML response.
  */
 function doGet(e) {
-  // If no action or action equals 'login', show login page
-  if (!e.parameter || !e.parameter.action || e.parameter.action === 'login') {
+  // Handle case where e or e.parameter is undefined
+  if (!e || !e.parameter || !e.parameter.action || e.parameter.action === 'login') {
     return addCorsHeadersHtml(
       HtmlService.createHtmlOutput(LOGIN_PAGE)
     );
@@ -662,6 +688,117 @@ function mapStatusToOpvolging(status) {
     default:
       return ''; // empty for new
   }
+}
+
+/**
+ * Creates a new task in the spreadsheet.
+ * @param {Object} taskData - The task data to create.
+ * @return {string} The ID of the created task.
+ */
+function createTask(taskData) {
+  const sheet = getActiveSheet();
+  
+  // Generate a unique ID for the task
+  const taskId = Utilities.getUuid();
+  
+  // Prepare the row data according to the sheet columns
+  const row = [
+    taskData.description || '',                    // Omschrijving (0)
+    taskData.requester_name || '',                 // naam aanvrager (1)
+    taskData.location || '',                       // Welke klas? Welk lokaal? (2)
+    taskData.required_materials || '',             // Benodigd materiaal (3)
+    mapUrgencyToPriority(taskData.urgency) || 'niet zo dringend', // prioriteit (4)
+    mapStatusToOpvolging(taskData.status) || '',   // opvolging (5)
+    taskData.photo_urls ? taskData.photo_urls.join(',') : '', // photo_urls (6)
+    taskData.maintenance_notes || '',              // Opmerkingen (7)
+    taskData.created_at || new Date().toISOString(), // datum gemaakt (8)
+    taskData.updated_at || new Date().toISOString(), // datum update (9)
+    taskData.completed_at || '',                   // datum opgelost (10)
+    taskId                                         // task_id (11)
+  ];
+  
+  sheet.appendRow(row);
+  return taskId;
+}
+
+/**
+ * Updates an existing task in the spreadsheet.
+ * @param {string} taskId - The ID of the task to update.
+ * @param {Object} updates - The fields to update.
+ * @return {boolean} True if task was found and updated, false otherwise.
+ */
+function updateTask(taskId, updates) {
+  const sheet = getActiveSheet();
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  
+  // Map header names to column indices
+  const headerIndices = {};
+  headers.forEach((header, index) => {
+    headerIndices[header] = index;
+  });
+  
+  // Find the task row with the matching ID
+  const taskIdColIndex = headerIndices['task_id'] || -1;
+  if (taskIdColIndex === -1) {
+    // task_id column not found, can't update
+    return false;
+  }
+  
+  let taskRowIndex = -1;
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][taskIdColIndex] === taskId) {
+      taskRowIndex = i;
+      break;
+    }
+  }
+  
+  if (taskRowIndex === -1) {
+    // Task not found
+    return false;
+  }
+  
+  // Prepare the row data
+  const row = data[taskRowIndex];
+  
+  // Apply updates
+  if (updates.description !== undefined) {
+    row[headerIndices['Omschrijving'] || 0] = updates.description;
+  }
+  if (updates.requester_name !== undefined) {
+    row[headerIndices['naam aanvrager'] || 1] = updates.requester_name;
+  }
+  if (updates.location !== undefined) {
+    row[headerIndices['Welke klas? Welk lokaal?'] || 2] = updates.location;
+  }
+  if (updates.required_materials !== undefined) {
+    row[headerIndices['Benodigd materiaal'] || 3] = updates.required_materials;
+  }
+  if (updates.urgency !== undefined) {
+    row[headerIndices['prioriteit'] || 4] = mapUrgencyToPriority(updates.urgency);
+  }
+  if (updates.status !== undefined) {
+    row[headerIndices['opvolging'] || 5] = mapStatusToOpvolging(updates.status);
+  }
+  if (updates.photo_urls !== undefined) {
+    row[headerIndices['photo_urls'] || 6] = updates.photo_urls ? updates.photo_urls.join(',') : '';
+  }
+  if (updates.maintenance_notes !== undefined) {
+    row[headerIndices['Opmerkingen'] || 7] = updates.maintenance_notes;
+  }
+  if (updates.created_at !== undefined) {
+    row[headerIndices['datum gemaakt'] || 8] = updates.created_at;
+  }
+  if (updates.updated_at !== undefined) {
+    row[headerIndices['datum update'] || 9] = updates.updated_at || new Date().toISOString();
+  }
+  if (updates.completed_at !== undefined) {
+    row[headerIndices['datum opgelost'] || 10] = updates.completed_at;
+  }
+  
+  // Update the row in the sheet
+  sheet.getRange(taskRowIndex + 1, 1, 1, row.length).setValues([row]);
+  return true;
 }
 
 /**

@@ -3,43 +3,69 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Report Issue - School Maintenance</title>
+    <title>Staff - Report Issue</title>
     <link rel="manifest" href="manifest.json">
     <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
     <div class="container">
-        <h1>Report a Problem</h1>
-        <form id="report-form">
-            <div>
-                <label for="photo">Photo (optional)</label>
-                <input type="file" id="photo" accept="image/*" capture="environment">
+        <h1>Staff - Report Issue</h1>
+        <form id="issueForm">
+            <div class="form-group">
+                <label for="description">Omschrijving *</label>
+                <textarea id="description" name="description" required></textarea>
             </div>
-            <div>
-                <label for="description">Problem Description</label>
-                <textarea id="description" rows="4" placeholder="Describe the problem..." required></textarea>
+            
+            <div class="form-group">
+                <label for="requester_name">Naam aanvrager *</label>
+                <input type="text" id="requester_name" name="requester_name" required>
             </div>
-            <div>
-                <label for="location">Location</label>
-                <input type="text" id="location" placeholder="e.g., Gang L4 (tussen L4 en L3)" required>
+            
+            <div class="form-group">
+                <label for="location">Welke klas? Welk lokaal? *</label>
+                <input type="text" id="location" name="location" required>
             </div>
-            <div>
-                <label for="urgency">Urgency</label>
-                <select id="urgency" required>
+            
+            <div class="form-group">
+                <label for="required_materials">Benodigd materiaal</label>
+                <input type="text" id="required_materials" name="required_materials">
+            </div>
+            
+            <div class="form-group">
+                <label for="urgency">Prioriteit *</label>
+                <select id="urgency" name="urgency" required>
                     <option value="">Select urgency</option>
                     <option value="Normal">Normal</option>
                     <option value="Important">Important</option>
                     <option value="Urgent">Urgent</option>
                 </select>
             </div>
-            <button type="submit" class="submit-btn">Report Problem</button>
-            <button type="button" id="cancel-btn" class="cancel-btn">Cancel</button>
+            
+            <div class="form-group">
+                <label for="status">Opvolging</label>
+                <select id="status" name="status">
+                    <option value="New">New</option>
+                    <option value="Planned">Planned</option>
+                    <option value="In progress">In progress</option>
+                    <option value="Waiting for materials">Waiting for materials</option>
+                    <option value="Completed">Completed</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="photo">Foto (optioneel)</label>
+                <input type="file" id="photo" name="photo" accept="image/*">
+            </div>
+            
+            <button type="submit" class="submit-btn">Issue melden</button>
+            <button type="button" class="cancel-btn" id="cancelButton">Annuleren</button>
         </form>
-        <div id="form-message" class="hidden"></div>
+        
+        <div id="form-message" class="message hidden"></div>
     </div>
-    <script src=\"../js/auth.js\"></script>
-    <script src=\"../js/utils.js\"></script>
-    <script src=\"../js/api.js\"></script>
-    <script src=\"../js/staff.js\"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/staff.js"></script>
 </body>
 </html>

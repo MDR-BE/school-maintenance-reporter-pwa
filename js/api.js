@@ -1,10 +1,13 @@
-/* api.js - Shared API utilities for the Maintenance PWA */
+// api.js - API client for the Maintenance PWA (ES Module)
+
+import { getApiBaseUrl, getAuthToken } from './utils.js';
 
 const apiCache = new Map();
 const CACHE_DURATION = 30000; // 30 seconds
 
 /**
- * Generic API fetch with caching and error handling
+ * Generic API fetch with caching and error handling.
+ * Uses form-urlencoded to avoid CORS preflight issues.
  * @param {string} endpoint - API endpoint (e.g., '?action=list')
  * @param {Object} options - Fetch options
  * @param {boolean} useCache - Whether to use cache for GET requests
@@ -15,12 +18,12 @@ async function apiFetch(endpoint, options = {}, useCache = false) {
   if (!token) {
     throw new Error('No auth token available');
   }
-
+  
   const url = new URL(getApiBaseUrl() + endpoint);
   url.searchParams.set('token', token);
-
+  
   const cacheKey = url.toString() + JSON.stringify(options);
-
+  
   // Check cache for GET requests
   if (useCache && (!options.method || options.method === 'GET')) {
     const cached = apiCache.get(cacheKey);
@@ -28,176 +31,172 @@ async function apiFetch(endpoint, options = {}, useCache = false) {
       return cached.data;
     }
   }
-
-  // Prepare headers
+  
+  // Prepare form-urlencoded body for POST requests
+  let body = null;
   const headers = {
-    ...options.headers
+    'Content-Type': 'application/x-www-form-urlencoded'
   };
-
-  // Set Content-Type appropriately
-  if (!(options.body instanceof FormData) && !headers['Content-Type']) {
-    headers['Content-Type'] = 'application/json';
+  
+  if (options.body && options.method && options.method.toUpperCase() === 'POST') {
+    // Convert body object to form data
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(options.body)) {
+      if (value !== undefined && value !== null) {
+        if (Array.isArray(value)) {
+          // For arrays (like photos), stringify as JSON
+          params.append(key, JSON.stringify(value));
+        } else {
+          params.append(key, String(value));
+        }
+      }
+    }
+    body = params.toString();
   }
-
+  
   const response = await fetch(url.toString(), {
     ...options,
-    headers
+    headers,
+    body
   });
-
+  
   if (response.status === 401 || response.status === 403) {
     clearAuthToken();
-    location.reload();
-    throw new Error('Authentication failed');
+    // Don't reload here - let the caller handle it
+    throw new Error('AUTH_EXPIRED');
   }
-
+  
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
+    let errorData = {};
+    try {
+      errorData = await response.json();
+    } catch (e) {
+      // Ignore parse errors
+    }
     throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
   }
-
+  
   const data = await response.json();
-
+  
+  // Handle standardized response format
+  if (data.success === false) {
+    const error = new Error(data.error || 'API Error');
+    error.code = data.code;
+    throw error;
+  }
+  
   // Cache successful GET responses
   if (useCache && (!options.method || options.method === 'GET')) {
-    apiCache.set(cacheKey, { data, timestamp: Date.now() });
+    apiCache.set(cacheKey, { data: data.data || data, timestamp: Date.now() });
   }
-
-  return data;
+  
+  return data.data || data;
 }
 
 /**
- * Fetch all tasks with optional filters
+ * Clears the API cache.
+ */
+export function clearApiCache() {
+  apiCache.clear();
+}
+
+/**
+ * Fetches all tasks with optional filters.
  * @param {Object} filters - Filter options (status, urgency, location)
  * @param {number} limit - Maximum number of tasks
  * @param {number} offset - Pagination offset
  * @returns {Promise<Array>} Array of tasks
  */
-async function fetchTasks(filters = {}, limit = 50, offset = 0) {
+export async function fetchTasks(filters = {}, limit = 50, offset = 0) {
   const params = new URLSearchParams({ action: 'list' });
   if (filters.status) params.set('status', filters.status);
   if (filters.urgency) params.set('urgency', filters.urgency);
   if (filters.location) params.set('location', filters.location);
   if (limit) params.set('limit', limit);
   if (offset) params.set('offset', offset);
-
+  
   return apiFetch('?' + params.toString(), {}, true);
 }
 
 /**
- * Fetch a single task by ID
+ * Fetches a single task by ID.
  * @param {string} taskId - Task ID
  * @returns {Promise<Object>} Task object
  */
-async function fetchTask(taskId) {
+export async function fetchTask(taskId) {
   const params = new URLSearchParams({ action: 'get', id: taskId });
   return apiFetch('?' + params.toString(), {}, true);
 }
 
 /**
- * Convert a File object to the format expected by Apps Script (Base64)
- * @param {File} file
- * @returns {Promise<Object>} {filename, mimeType, base64}
+ * Fetches task counts by status.
+ * @returns {Promise<Object>} Counts object
  */
-async function photoToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-
-    reader.onload = () => {
-      const dataUrl = reader.result;
-
-      // Remove "data:image/jpeg;base64," prefix
-      const base64 = dataUrl.split(',')[1];
-
-      resolve({
-        filename: file.name,
-        mimeType: file.type,
-        base64: base64
-      });
-    };
-
-    reader.onerror = () => {
-      reject(new Error(`Could not read photo: ${file.name}`));
-    };
-
-    reader.readAsDataURL(file);
-  });
+export async function fetchTaskCounts() {
+  const params = new URLSearchParams({ action: 'counts' });
+  return apiFetch('?' + params.toString(), {}, true);
 }
 
 /**
- * Creates a new task and optionally uploads one or more photos.
+ * Creates a new task with optional photos.
  * @param {Object} taskData - Task data (description, requester_name, location, etc.)
  * @param {File|File[]|null} photos - Optional photo file(s)
- * @returns {Promise<Object>} Result with taskId
+ * @returns {Promise<Object>} Result with taskId and task
  */
-async function createTask(taskData, photos = null) {
+export async function createTask(taskData, photos = null) {
   const photoArray = photos
     ? (Array.isArray(photos) ? photos : [photos])
     : [];
-
+  
+  // Process photos to base64
   const convertedPhotos = await Promise.all(
     photoArray.map(photoToBase64)
   );
-
+  
+  // Prepare payload
   const payload = {
     ...taskData,
     photos: convertedPhotos
   };
-
+  
+  // Remove photos from payload if empty (optional field)
+  if (convertedPhotos.length === 0) {
+    delete payload.photos;
+  }
+  
   return apiFetch('', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(payload)
+    body: { action: 'create', ...payload }
   });
 }
 
 /**
- * Update an existing task
+ * Updates an existing task.
  * @param {string} taskId - Task ID
  * @param {Object} updates - Fields to update
- * @returns {Promise<Object>} Result
+ * @returns {Promise<Object>} Updated task
  */
-async function updateTask(taskId, updates) {
-  const params = new URLSearchParams({ action: 'update', id: taskId });
-
-  return apiFetch('?' + params.toString(), {
+export async function updateTask(taskId, updates) {
+  return apiFetch('', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(updates)
+    body: { action: 'update', id: taskId, ...updates }
   });
 }
 
 /**
- * Clear the API cache
+ * Uploads photos to an existing task.
+ * @param {string} taskId - Task ID
+ * @param {File|File[]} photos - Photo file(s)
+ * @returns {Promise<Object>} Updated task
  */
-function clearApiCache() {
-  apiCache.clear();
-}
-
-/**
- * Show a message in the form-message element
- * @param {string} elementId - The message element ID
- * @param {string} message - The message to show
- * @param {string} type - The type of message: 'success', 'error', 'info'
- */
-function showMessage(elementId, message, type = 'info') {
-  const el = document.getElementById(elementId);
-  if (!el) return;
-  el.textContent = message;
-  el.className = `message ${type}`;
-  el.classList.remove('hidden');
-}
-
-/**
- * Hide a message element
- * @param {string} elementId - The ID of the element to hide
- */
-function hideMessage(elementId) {
-  const el = document.getElementById(elementId);
-  if (el) {
-    el.classList.add('hidden');
-  }
+export async function uploadPhotos(taskId, photos) {
+  const photoArray = Array.isArray(photos) ? photos : [photos];
+  const convertedPhotos = await Promise.all(
+    photoArray.map(photoToBase64)
+  );
+  
+  return apiFetch('', {
+    method: 'POST',
+    body: { action: 'upload_photos', id: taskId, photos: convertedPhotos }
+  });
 }

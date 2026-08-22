@@ -1,22 +1,35 @@
-// Maintenance worker interface logic for the Maintenance PWA
+// worker.js - Maintenance worker interface logic for the Maintenance PWA (ES Module)
 
+import { fetchTasks, fetchTask, updateTask, parsePhotoData, clearApiCache } from './api.js';
+import { showMessage, hideMessage, formatDateTime, escapeHtml, createSafeElement, debounce } from './utils.js';
+import { requireAuth, logout } from './auth.js';
+
+// Module-level variables (fixed scope issues)
+let filterStatus = null;
+let filterUrgency = null;
+let filterLocation = null;
+let taskListLoading = null;
+let taskList = null;
+let taskDetailContainer = null;
+let taskDetailContent = null;
+let backToListBtn = null;
 let currentTasks = [];
 let currentTaskId = null;
 
-document.addEventListener('DOMContentLoaded', () => {
-  const filterStatus = document.getElementById('filter-status');
-  const filterUrgency = document.getElementById('filter-urgency');
-  const filterLocation = document.getElementById('filter-location');
+/**
+ * Initializes DOM references and event listeners.
+ */
+function initializeDOM() {
+  filterStatus = document.getElementById('filter-status');
+  filterUrgency = document.getElementById('filter-urgency');
+  filterLocation = document.getElementById('filter-location');
   const applyFiltersBtn = document.getElementById('apply-filters');
   const resetFiltersBtn = document.getElementById('reset-filters');
-  const taskListLoading = document.getElementById('task-list-loading');
-  const taskList = document.getElementById('task-list');
-  const taskDetailContainer = document.getElementById('task-detail-container');
-  const backToListBtn = document.getElementById('back-to-list');
-  const taskDetailContent = document.getElementById('task-detail-content');
-
-  // Load tasks initially
-  loadTasks();
+  taskListLoading = document.getElementById('task-list-loading');
+  taskList = document.getElementById('task-list');
+  taskDetailContainer = document.getElementById('task-detail-container');
+  backToListBtn = document.getElementById('back-to-list');
+  taskDetailContent = document.getElementById('task-detail-content');
 
   // Event listeners for filters
   if (applyFiltersBtn) {
@@ -27,9 +40,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (resetFiltersBtn) {
     resetFiltersBtn.addEventListener('click', () => {
-      filterStatus.value = '';
-      filterUrgency.value = '';
-      filterLocation.value = '';
+      if (filterStatus) filterStatus.value = '';
+      if (filterUrgency) filterUrgency.value = '';
+      if (filterLocation) filterLocation.value = '';
       loadTasks();
     });
   }
@@ -39,19 +52,46 @@ document.addEventListener('DOMContentLoaded', () => {
       showTaskList();
     });
   }
-});
+
+  // Add click handler to task list for opening details
+  if (taskList) {
+    taskList.addEventListener('click', (e) => {
+      // Check if clicked on a task item (not a button)
+      const taskItem = e.target.closest('.task-item');
+      const button = e.target.closest('button');
+      
+      if (taskItem && !button) {
+        const taskId = taskItem.dataset.taskId;
+        if (taskId) {
+          openTaskDetail(taskId);
+        }
+      }
+    });
+  }
+
+  // Add logout button handler
+  const logoutBtn = document.getElementById('logout-btn');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', logout);
+  }
+}
 
 /**
- * Load tasks from the backend with current filters.
+ * Loads tasks from the backend with current filters.
  */
 async function loadTasks() {
+  if (!filterStatus || !filterUrgency || !filterLocation || !taskListLoading || !taskList) {
+    console.error('DOM elements not initialized');
+    return;
+  }
+
   const status = filterStatus.value;
   const urgency = filterUrgency.value;
   const location = filterLocation.value.trim();
 
   taskListLoading.classList.remove('hidden');
   taskList.innerHTML = '';
-  taskDetailContainer.classList.add('hidden');
+  if (taskDetailContainer) taskDetailContainer.classList.add('hidden');
 
   try {
     const filters = {};
@@ -63,125 +103,135 @@ async function loadTasks() {
     renderTaskList();
   } catch (error) {
     console.error('Error loading tasks:', error);
-    taskListLoading.textContent = 'Failed to load tasks. Please try again.';
+    
+    let message = 'Failed to load tasks. Please try again.';
+    if (error.message === 'AUTH_EXPIRED') {
+      message = 'Uw sessie is verlopen. Gelieve opnieuw in te loggen.';
+      setTimeout(() => location.reload(), 2000);
+    } else if (error.code) {
+      message = `Fout: ${error.message}`;
+    }
+    
+    taskListLoading.textContent = message;
   } finally {
     taskListLoading.classList.add('hidden');
   }
 }
 
 /**
- * Parse photo_urls string into array
- * @param {string} photoUrlsString - Comma-separated photo URLs from backend
- * @returns {Array<string>} Array of photo URLs
- */
-function parsePhotoUrls(photoUrlsString) {
-  if (!photoUrlsString) return [];
-  return String(photoUrlsString)
-    .split(',')
-    .map(url => url.trim())
-    .filter(Boolean);
-}
-
-/**
- * Render the list of tasks.
+ * Renders the list of tasks.
  */
 function renderTaskList() {
+  if (!taskList) return;
+  
   taskList.innerHTML = '';
 
   if (currentTasks.length === 0) {
-    const li = document.createElement('li');
-    li.textContent = 'No tasks found.';
-    li.style.textAlign = 'center';
-    li.style.padding = '2rem';
+    const li = createSafeElement('li', 'Geen taken gevonden.', { class: 'task-item', style: 'text-align:center;padding:2rem;' });
     taskList.appendChild(li);
     return;
   }
 
   currentTasks.forEach(task => {
-    const li = document.createElement('li');
-    li.className = 'task-item';
-    li.dataset.taskId = task.id;
+    const li = createSafeElement('li', null, { class: 'task-item', dataset: { taskId: task.id } });
 
     // Task header with ID and urgency
-    const header = document.createElement('div');
-    header.className = 'task-header';
+    const header = createSafeElement('div', null, { class: 'task-header' });
 
-    const idSpan = document.createElement('span');
-    idSpan.className = 'task-id';
-    idSpan.textContent = task.id.substring(0, 8); // show first 8 chars of UUID
+    const idSpan = createSafeElement('span', task.id.substring(0, 8), { class: 'task-id' });
     header.appendChild(idSpan);
 
-    const urgencySpan = document.createElement('span');
-    urgencySpan.className = `task-urgency ${task.urgency.toLowerCase()}`;
-    urgencySpan.textContent = task.urgency;
+    const urgencySpan = createSafeElement('span', task.urgency, { class: `task-urgency ${task.urgency.toLowerCase()}` });
     header.appendChild(urgencySpan);
 
     li.appendChild(header);
 
     // Description
-    const descP = document.createElement('p');
-    descP.className = 'task-description';
-    descP.textContent = task.description;
+    const descP = createSafeElement('p', task.description, { class: 'task-description' });
     li.appendChild(descP);
 
     // Location and requester
-    const metaDiv = document.createElement('div');
-    metaDiv.className = 'task-meta';
+    const metaDiv = createSafeElement('div', null, { class: 'task-meta' });
 
-    const locationP = document.createElement('p');
-    locationP.className = 'task-location';
-    locationP.innerHTML = `<strong>Location:</strong> ${task.location}`;
+    const locationP = createSafeElement('p', null, { class: 'task-location' });
+    const locationStrong = createSafeElement('strong', 'Locatie: ');
+    locationP.appendChild(locationStrong);
+    locationP.appendChild(document.createTextNode(task.location));
     metaDiv.appendChild(locationP);
 
-    const requesterP = document.createElement('p');
-    requesterP.className = 'task-requester';
-    requesterP.innerHTML = `<strong>Reported by:</strong> ${task.requester_name || 'Anonymous'}`;
+    const requesterP = createSafeElement('p', null, { class: 'task-requester' });
+    const requesterStrong = createSafeElement('strong', 'Gemeld door: ');
+    requesterP.appendChild(requesterStrong);
+    requesterP.appendChild(document.createTextNode(task.requester_name || 'Anoniem'));
     metaDiv.appendChild(requesterP);
 
     li.appendChild(metaDiv);
 
     // Actions
-    const actionsDiv = document.createElement('div');
-    actionsDiv.className = 'task-actions';
+    const actionsDiv = createSafeElement('div', null, { class: 'task-actions' });
 
-    const statusBtn = document.createElement('button');
-    statusBtn.className = 'status-btn';
-    statusBtn.textContent = 'Update Status';
-    statusBtn.addEventListener('click', () => {
+    const statusBtn = createSafeElement('button', 'Status wijzigen', { class: 'status-btn' });
+    statusBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
       showStatusUpdateModal(task);
     });
     actionsDiv.appendChild(statusBtn);
 
-    const notesBtn = document.createElement('button');
-    notesBtn.className = 'notes-btn';
-    notesBtn.textContent = 'Add Notes';
-    notesBtn.addEventListener('click', () => {
+    const notesBtn = createSafeElement('button', 'Notities', { class: 'notes-btn' });
+    notesBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
       showNotesModal(task);
     });
     actionsDiv.appendChild(notesBtn);
 
     // Optional: view photos
-    const photoUrls = parsePhotoUrls(task.photo_urls);
-    if (photoUrls.length > 0) {
-      const photosBtn = document.createElement('button');
-      photosBtn.className = 'status-btn';
-      photosBtn.textContent = 'View Photos';
-      photosBtn.addEventListener('click', () => {
+    const photos = parsePhotoData(task.photo_urls);
+    if (photos.length > 0) {
+      const photosBtn = createSafeElement('button', 'Foto\'s bekijken', { class: 'status-btn' });
+      photosBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
         showPhotosModal(task);
       });
       actionsDiv.appendChild(photosBtn);
     }
 
     li.appendChild(actionsDiv);
-
     taskList.appendChild(li);
   });
 }
 
 /**
- * Show the task list view.
+ * Opens task detail view.
+ * @param {string} taskId - Task ID to open
+ */
+async function openTaskDetail(taskId) {
+  if (!taskDetailContainer || !taskDetailContent || !taskListLoading) return;
+
+  currentTaskId = taskId;
+  
+  // Find task in current list first (avoid extra API call)
+  let task = currentTasks.find(t => t.id === taskId);
+  
+  if (!task) {
+    // Fetch from API if not in current list
+    try {
+      task = await fetchTask(taskId);
+    } catch (error) {
+      console.error('Error fetching task:', error);
+      showMessage('task-detail-content', 'Kon taak niet laden.', 'error');
+      return;
+    }
+  }
+  
+  showTaskDetail(task);
+}
+
+/**
+ * Shows the task list view.
  */
 function showTaskList() {
+  if (!taskDetailContainer || !taskListLoading) return;
+  
   taskDetailContainer.classList.add('hidden');
   taskListLoading.classList.remove('hidden');
   // Reload tasks to reflect any changes
@@ -189,10 +239,12 @@ function showTaskList() {
 }
 
 /**
- * Show the task detail view.
+ * Shows the task detail view.
  * @param {Object} task - The task to show details for.
  */
-async function showTaskDetail(task) {
+function showTaskDetail(task) {
+  if (!taskDetailContainer || !taskDetailContent || !taskListLoading) return;
+
   currentTaskId = task.id;
   taskDetailContainer.classList.remove('hidden');
   taskListLoading.classList.add('hidden');
@@ -202,47 +254,48 @@ async function showTaskDetail(task) {
 
   const fields = [
     { label: 'Task ID', value: task.id },
-    { label: 'Description', value: task.description },
-    { label: 'Location', value: task.location },
-    { label: 'Reported by', value: task.requester_name || 'Anonymous' },
-    { label: 'Urgency', value: task.urgency },
+    { label: 'Omschrijving', value: task.description },
+    { label: 'Locatie', value: task.location },
+    { label: 'Gemeld door', value: task.requester_name || 'Anoniem' },
+    { label: 'Prioriteit', value: task.urgency },
     { label: 'Status', value: task.status },
-    { label: 'Required Materials', value: task.required_materials || 'None' },
-    { label: 'Maintenance Notes', value: task.maintenance_notes || 'None' },
-    { label: 'Created at', value: formatDateTime(task.created_at) },
-    { label: 'Updated at', value: formatDateTime(task.updated_at) },
-    { label: 'Completed at', value: formatDateTime(task.completed_at) }
+    { label: 'Benodigd materiaal', value: task.required_materials || 'Geen' },
+    { label: 'Onderhoudsnotities', value: task.maintenance_notes || 'Geen' },
+    { label: 'Aangemaakt', value: formatDateTime(task.created_at) },
+    { label: 'Laatst bijgewerkt', value: formatDateTime(task.updated_at) },
+    { label: 'Voltooid', value: formatDateTime(task.completed_at) }
   ];
 
   fields.forEach(field => {
-    const div = document.createElement('div');
-    div.style.marginBottom = '0.5rem';
-    const label = document.createElement('strong');
-    label.textContent = `${field.label}: `;
+    const div = createSafeElement('div', null, { style: 'margin-bottom:0.5rem;' });
+    const label = createSafeElement('strong', `${field.label}: `);
     div.appendChild(label);
     div.appendChild(document.createTextNode(field.value));
     taskDetailContent.appendChild(div);
   });
 
   // Photos
-  const photoUrls = parsePhotoUrls(task.photo_urls);
-  if (photoUrls.length > 0) {
-    const photosHeading = document.createElement('h3');
-    photosHeading.textContent = 'Photos';
+  const photos = parsePhotoData(task.photo_urls);
+  if (photos.length > 0) {
+    const photosHeading = createSafeElement('h3', 'Foto\'s');
     taskDetailContent.appendChild(photosHeading);
 
-    const photosDiv = document.createElement('div');
-    photosDiv.style.display = 'flex';
-    photosDiv.style.flexWrap = 'wrap';
-    photosDiv.style.gap = '0.5rem';
+    const photosDiv = createSafeElement('div', null, { 
+      style: 'display:flex;flex-wrap:wrap;gap:0.5rem;margin-top:0.5rem;' 
+    });
 
-    photoUrls.forEach(url => {
+    photos.forEach(photo => {
       const img = document.createElement('img');
-      img.src = url;
+      img.src = photo.url;
+      img.alt = photo.filename || 'Foto';
       img.style.maxWidth = '150px';
       img.style.maxHeight = '150px';
       img.style.border = '1px solid #ddd';
       img.style.borderRadius = '4px';
+      img.style.cursor = 'pointer';
+      img.addEventListener('click', () => {
+        window.open(photo.url, '_blank');
+      });
       photosDiv.appendChild(img);
     });
 
@@ -250,35 +303,37 @@ async function showTaskDetail(task) {
   }
 
   // Action buttons
-  const actionsDiv = document.createElement('div');
-  actionsDiv.style.marginTop = '1.5rem';
-  actionsDiv.style.display = 'flex';
-  actionsDiv.style.gap = '0.5rem';
+  const actionsDiv = createSafeElement('div', null, { 
+    style: 'margin-top:1.5rem;display:flex;gap:0.5rem;flex-wrap:wrap;' 
+  });
 
-  const updateStatusBtn = document.createElement('button');
-  updateStatusBtn.className = 'submit-btn';
-  updateStatusBtn.textContent = 'Update Status';
+  const updateStatusBtn = createSafeElement('button', 'Status wijzigen', { class: 'submit-btn' });
   updateStatusBtn.addEventListener('click', () => {
     showStatusUpdateModal(task);
   });
   actionsDiv.appendChild(updateStatusBtn);
 
-  const addNotesBtn = document.createElement('button');
-  addNotesBtn.className = 'submit-btn';
-  addNotesBtn.textContent = 'Add/Edit Notes';
+  const addNotesBtn = createSafeElement('button', 'Notities bewerken', { class: 'submit-btn' });
   addNotesBtn.addEventListener('click', () => {
     showNotesModal(task);
   });
   actionsDiv.appendChild(addNotesBtn);
 
-  const completeBtn = document.createElement('button');
-  completeBtn.className = task.status === 'Completed' ? 'cancel-btn' : 'submit-btn';
-  completeBtn.textContent = task.status === 'Completed' ? 'Reopen' : 'Mark as Completed';
-  completeBtn.addEventListener('click', () => {
-    if (task.status === 'Completed') {
-      updateTaskStatus(task.id, 'New'); // or maybe 'In progress'? We'll use 'New' for simplicity.
-    } else {
-      updateTaskStatus(task.id, 'Completed');
+  const completeBtn = createSafeElement(
+    'button', 
+    task.status === 'Completed' ? 'Heropenen' : 'Markeer als voltooid', 
+    { class: task.status === 'Completed' ? 'cancel-btn' : 'submit-btn' }
+  );
+  completeBtn.addEventListener('click', async () => {
+    try {
+      if (task.status === 'Completed') {
+        await updateTaskStatus(task.id, 'In progress'); // Reopen goes to In progress
+      } else {
+        await updateTaskStatus(task.id, 'Completed');
+      }
+      // Refresh will happen in the update functions
+    } catch (error) {
+      console.error('Error updating status:', error);
     }
   });
   actionsDiv.appendChild(completeBtn);
@@ -287,196 +342,281 @@ async function showTaskDetail(task) {
 }
 
 /**
- * Show a modal to update the task status.
+ * Shows a modal to update the task status.
  * @param {Object} task - The task to update.
  */
 function showStatusUpdateModal(task) {
-  const modal = document.createElement('div');
-  modal.className = 'modal';
-  modal.innerHTML = `
-    <div class="modal-content">
-      <span class="close-btn">&times;</span>
-      <h2>Update Status</h2>
-      <form id="status-form">
-        <div>
-          <label for="status-select">New Status:</label>
-          <select id="status-select" required>
-            <option value="">Select status</option>
-            <option value="New">New</option>
-            <option value="Planned">Planned</option>
-            <option value="In progress">In progress</option>
-            <option value="Waiting for materials">Waiting for materials</option>
-            <option value="Completed">Completed</option>
-          </select>
-        </div>
-        <button type="submit" class="submit-btn">Update</button>
-        <button type="button" id="cancel-status-btn" class="cancel-btn">Cancel</button>
-      </form>
-    </div>
-  `;
+  const modal = createSafeElement('div', null, { class: 'modal' });
+  
+  const modalContent = createSafeElement('div', null, { class: 'modal-content' });
+  
+  const closeBtn = createSafeElement('span', '×', { class: 'close-btn' });
+  closeBtn.style.cssText = 'position:absolute;top:10px;right:15px;color:#aaa;font-size:28px;font-weight:bold;cursor:pointer;';
+  closeBtn.addEventListener('click', () => modal.remove());
+  
+  const title = createSafeElement('h2', 'Status wijzigen', { style: 'margin-top:0;' });
+  
+  const form = createSafeElement('form', null, { id: 'status-form' });
+  
+  const selectDiv = createSafeElement('div', null, { style: 'margin-bottom:1rem;' });
+  const label = createSafeElement('label', 'Nieuwe status:', { 
+    for: 'status-select', 
+    style: 'display:block;margin-bottom:0.5rem;font-weight:500;' 
+  });
+  const select = createSafeElement('select', null, { 
+    id: 'status-select', 
+    required: true,
+    style: 'width:100%;padding:0.5rem;border:1px solid #ddd;border-radius:4px;'
+  });
+  
+  const statuses = ['New', 'Planned', 'In progress', 'Waiting for materials', 'Completed'];
+  statuses.forEach(s => {
+    const option = createSafeElement('option', s, { value: s });
+    select.appendChild(option);
+  });
+  
+  selectDiv.appendChild(label);
+  selectDiv.appendChild(select);
+  form.appendChild(selectDiv);
+  
+  const btnDiv = createSafeElement('div', null, { style: 'display:flex;gap:0.5rem;' });
+  const submitBtn = createSafeElement('button', 'Bijwerken', { 
+    type: 'submit', 
+    class: 'submit-btn',
+    style: 'flex:1;' 
+  });
+  const cancelBtn = createSafeElement('button', 'Annuleren', { 
+    type: 'button', 
+    id: 'cancel-status-btn', 
+    class: 'cancel-btn',
+    style: 'flex:1;' 
+  });
+  
+  btnDiv.appendChild(submitBtn);
+  btnDiv.appendChild(cancelBtn);
+  form.appendChild(btnDiv);
+  
+  modalContent.appendChild(closeBtn);
+  modalContent.appendChild(title);
+  modalContent.appendChild(form);
+  modal.appendChild(modalContent);
   document.body.appendChild(modal);
 
-  const statusSelect = modal.querySelector('#status-select');
-  statusSelect.value = task.status;
+  // Set current status
+  select.value = task.status;
 
-  const closeBtn = modal.querySelector('.close-btn');
-  const cancelBtn = modal.querySelector('#cancel-status-btn');
-  const form = modal.querySelector('#status-form');
-
-  const closeModal = () => {
-    modal.remove();
-  };
+  const closeModal = () => modal.remove();
 
   closeBtn.addEventListener('click', closeModal);
   cancelBtn.addEventListener('click', closeModal);
+  
+  // Close on backdrop click
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeModal();
+  });
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const newStatus = statusSelect.value;
+    const newStatus = select.value;
     if (!newStatus) {
-      showMessage('status-form', 'Please select a status.', 'error');
+      showMessage('status-form', 'Gelieve een status te selecteren.', 'error');
       return;
     }
 
     try {
       await updateTaskStatus(task.id, newStatus);
-      showMessage('status-form', 'Status updated successfully.', 'success');
+      showMessage('status-form', 'Status succesvol bijgewerkt.', 'success');
       setTimeout(async () => {
         closeModal();
-        loadTasks(); // refresh the list
+        await loadTasks(); // refresh the list
         if (!taskDetailContainer.classList.contains('hidden') && currentTaskId === task.id) {
-          const updatedTask = await getTaskById(task.id);
+          const updatedTask = await fetchTask(task.id);
           showTaskDetail(updatedTask); // refresh detail
         }
-      }, 1500);
+      }, 1000);
     } catch (error) {
       console.error('Error updating status:', error);
-      showMessage('status-form', 'Failed to update status. Please try again.', 'error');
+      let message = 'Kon status niet bijwerken. Probeer het opnieuw.';
+      if (error.code === 'INVALID_TRANSITION') {
+        message = `Ongeldige status overgang: ${task.status} → ${newStatus}`;
+      } else if (error.message === 'AUTH_EXPIRED') {
+        message = 'Uw sessie is verlopen. Gelieve opnieuw in te loggen.';
+        setTimeout(() => location.reload(), 2000);
+      }
+      showMessage('status-form', message, 'error');
     }
   });
 }
 
 /**
- * Show a modal to add/edit maintenance notes.
+ * Shows a modal to add/edit maintenance notes.
  * @param {Object} task - The task to update.
  */
 function showNotesModal(task) {
-  const modal = document.createElement('div');
-  modal.className = 'modal';
-  modal.innerHTML = `
-    <div class="modal-content">
-      <span class="close-btn">&times;</span>
-      <h2>Maintenance Notes</h2>
-      <form id="notes-form">
-        <div>
-          <label for="notes-textarea">Notes:</label>
-          <textarea id="notes-textarea" rows="4">${task.maintenance_notes || ''}</textarea>
-        </div>
-        <button type="submit" class="submit-btn">Save Notes</button>
-        <button type="button" id="cancel-notes-btn" class="cancel-btn">Cancel</button>
-      </form>
-    </div>
-  `;
+  const modal = createSafeElement('div', null, { class: 'modal' });
+  
+  const modalContent = createSafeElement('div', null, { class: 'modal-content' });
+  
+  const closeBtn = createSafeElement('span', '×', { class: 'close-btn' });
+  closeBtn.style.cssText = 'position:absolute;top:10px;right:15px;color:#aaa;font-size:28px;font-weight:bold;cursor:pointer;';
+  closeBtn.addEventListener('click', () => modal.remove());
+  
+  const title = createSafeElement('h2', 'Onderhoudsnotities', { style: 'margin-top:0;' });
+  
+  const form = createSafeElement('form', null, { id: 'notes-form' });
+  
+  const textareaDiv = createSafeElement('div', null, { style: 'margin-bottom:1rem;' });
+  const label = createSafeElement('label', 'Notities:', { 
+    for: 'notes-textarea', 
+    style: 'display:block;margin-bottom:0.5rem;font-weight:500;' 
+  });
+  const textarea = createSafeElement('textarea', task.maintenance_notes || '', { 
+    id: 'notes-textarea', 
+    rows: 4,
+    style: 'width:100%;padding:0.5rem;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-family:inherit;'
+  });
+  
+  textareaDiv.appendChild(label);
+  textareaDiv.appendChild(textarea);
+  form.appendChild(textareaDiv);
+  
+  const btnDiv = createSafeElement('div', null, { style: 'display:flex;gap:0.5rem;' });
+  const submitBtn = createSafeElement('button', 'Opslaan', { 
+    type: 'submit', 
+    class: 'submit-btn',
+    style: 'flex:1;' 
+  });
+  const cancelBtn = createSafeElement('button', 'Annuleren', { 
+    type: 'button', 
+    id: 'cancel-notes-btn', 
+    class: 'cancel-btn',
+    style: 'flex:1;' 
+  });
+  
+  btnDiv.appendChild(submitBtn);
+  btnDiv.appendChild(cancelBtn);
+  form.appendChild(btnDiv);
+  
+  modalContent.appendChild(closeBtn);
+  modalContent.appendChild(title);
+  modalContent.appendChild(form);
+  modal.appendChild(modalContent);
   document.body.appendChild(modal);
 
-  const notesTextarea = modal.querySelector('#notes-textarea');
-  const closeBtn = modal.querySelector('.close-btn');
-  const cancelBtn = modal.querySelector('#cancel-notes-btn');
-  const form = modal.querySelector('#notes-form');
-
-  const closeModal = () => {
-    modal.remove();
-  };
+  const closeModal = () => modal.remove();
 
   closeBtn.addEventListener('click', closeModal);
   cancelBtn.addEventListener('click', closeModal);
+  
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeModal();
+  });
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const notes = notesTextarea.value.trim();
+    const notes = textarea.value.trim();
 
     try {
       await updateTaskNotes(task.id, notes);
-      showMessage('notes-form', 'Notes saved successfully.', 'success');
+      showMessage('notes-form', 'Notities opgeslagen.', 'success');
       setTimeout(async () => {
         closeModal();
-        loadTasks(); // refresh the list
+        await loadTasks();
         if (!taskDetailContainer.classList.contains('hidden') && currentTaskId === task.id) {
-          const updatedTask = await getTaskById(task.id);
-          showTaskDetail(updatedTask); // refresh detail
+          const updatedTask = await fetchTask(task.id);
+          showTaskDetail(updatedTask);
         }
-      }, 1500);
+      }, 1000);
     } catch (error) {
       console.error('Error saving notes:', error);
-      showMessage('notes-form', 'Failed to save notes. Please try again.', 'error');
+      let message = 'Kon notities niet opslaan. Probeer het opnieuw.';
+      if (error.message === 'AUTH_EXPIRED') {
+        message = 'Uw sessie is verlopen. Gelieve opnieuw in te loggen.';
+        setTimeout(() => location.reload(), 2000);
+      }
+      showMessage('notes-form', message, 'error');
     }
   });
 }
 
 /**
- * Show a modal to view photos.
+ * Shows a modal to view photos.
  * @param {Object} task - The task whose photos to view.
  */
 function showPhotosModal(task) {
-  const modal = document.createElement('div');
-  modal.className = 'modal';
-  modal.innerHTML = `
-    <div class="modal-content">
-      <span class="close-btn">&times;</span>
-      <h2>Photos</h2>
-      <div id="photos-container" style="display: flex; flex-wrap: wrap; gap: 0.5rem; max-height: 80vh; overflow-y: auto;">
-        <!-- Photos will be inserted here -->
-      </div>
-    </div>
-  `;
-  document.body.appendChild(modal);
-
-  const photosContainer = modal.querySelector('#photos-container');
-  const closeBtn = modal.querySelector('.close-btn');
-
-  const photoUrls = parsePhotoUrls(task.photo_urls);
-  photoUrls.forEach(url => {
+  const modal = createSafeElement('div', null, { class: 'modal' });
+  
+  const modalContent = createSafeElement('div', null, { class: 'modal-content' });
+  
+  const closeBtn = createSafeElement('span', '×', { class: 'close-btn' });
+  closeBtn.style.cssText = 'position:absolute;top:10px;right:15px;color:#aaa;font-size:28px;font-weight:bold;cursor:pointer;';
+  closeBtn.addEventListener('click', () => modal.remove());
+  
+  const title = createSafeElement('h2', 'Foto\'s', { style: 'margin-top:0;' });
+  
+  const photosContainer = createSafeElement('div', null, { 
+    id: 'photos-container', 
+    style: 'display:flex;flex-wrap:wrap;gap:0.5rem;max-height:80vh;overflow-y:auto;margin-top:1rem;' 
+  });
+  
+  const photos = parsePhotoData(task.photo_urls);
+  photos.forEach(photo => {
     const img = document.createElement('img');
-    img.src = url;
+    img.src = photo.url;
+    img.alt = photo.filename || 'Foto';
     img.style.maxWidth = '200px';
     img.style.maxHeight = '200px';
     img.style.border = '1px solid #ddd';
     img.style.borderRadius = '4px';
+    img.style.cursor = 'pointer';
+    img.addEventListener('click', () => {
+      window.open(photo.url, '_blank');
+    });
     photosContainer.appendChild(img);
   });
+  
+  modalContent.appendChild(closeBtn);
+  modalContent.appendChild(title);
+  modalContent.appendChild(photosContainer);
+  modal.appendChild(modalContent);
+  document.body.appendChild(modal);
 
-  const closeModal = () => {
-    modal.remove();
-  };
-
+  const closeModal = () => modal.remove();
   closeBtn.addEventListener('click', closeModal);
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeModal();
+  });
 }
 
 /**
- * Update the status of a task via the backend.
+ * Updates the status of a task via the backend.
  * @param {string} taskId - The task ID.
  * @param {string} newStatus - The new status.
  * @return {Promise} Promise that resolves when the update is complete.
  */
 async function updateTaskStatus(taskId, newStatus) {
-  return updateTask(taskId, { status: newStatus });
+  const result = await updateTask(taskId, { status: newStatus });
+  clearApiCache(); // Invalidate cache after mutation
+  return result;
 }
 
 /**
- * Update the maintenance notes of a task via the backend.
+ * Updates the maintenance notes of a task via the backend.
  * @param {string} taskId - The task ID.
  * @param {string} notes - The notes to save.
  * @return {Promise} Promise that resolves when the update is complete.
  */
 async function updateTaskNotes(taskId, notes) {
-  return updateTask(taskId, { maintenance_notes: notes });
+  const result = await updateTask(taskId, { maintenance_notes: notes });
+  clearApiCache(); // Invalidate cache after mutation
+  return result;
 }
 
-/**
- * Get a task by its ID from the backend.
- * @param {string} taskId - The task ID.
- * @return {Promise<Object>} The task.
- */
-async function getTaskById(taskId) {
-  return fetchTask(taskId);
-}
+// Initialize on DOM ready
+document.addEventListener('DOMContentLoaded', async () => {
+  // Require authentication
+  await requireAuth();
+  
+  initializeDOM();
+  loadTasks();
+});

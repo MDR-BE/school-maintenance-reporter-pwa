@@ -9,7 +9,11 @@
 </head>
 <body>
     <div class="container">
-        <h1>Maintenance Worker</h1>
+        <header style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+            <h1>Maintenance Worker</h1>
+            <button id="logout-btn" class="cancel-btn" style="padding:0.5rem 1rem;font-size:0.9rem;">Logout</button>
+        </header>
+        
         <div class="worker-toolbar">
             <div class="filter-group">
                 <label for="filter-status">Status:</label>
@@ -46,16 +50,15 @@
         </div>
 
         <div id="task-detail-container" class="hidden">
-            <h2>Task Details</h2>
-            <button id="back-to-list" class="cancel-btn">&#8592; Back to List</button>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+                <h2>Task Details</h2>
+                <button id="back-to-list" class="cancel-btn">&#8592; Back to List</button>
+            </div>
             <div id="task-detail-content">
                 <!-- Task detail will be inserted here -->
             </div>
         </div>
     </div>
-    <script src="js/auth.js"></script>
-    <script src="js/utils.js"></script>
-    <script src="js/api.js"></script>
-    <script src="js/worker.js"></script>
+    <script type="module" src="js/worker.js"></script>
 </body>
 </html>

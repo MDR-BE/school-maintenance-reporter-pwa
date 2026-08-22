@@ -54,7 +54,8 @@
             
             <div class="form-group">
                 <label for="photo">Foto (optioneel)</label>
-                <input type="file" id="photo" name="photo" accept="image/*">
+                <input type="file" id="photo" name="photo" accept="image/jpeg,image/png,image/webp">
+                <div id="photo-preview" style="margin-top:0.5rem;"></div>
             </div>
             
             <button type="submit" class="submit-btn">Issue melden</button>
@@ -63,9 +64,6 @@
         
         <div id="form-message" class="message hidden"></div>
     </div>
-    <script src="js/auth.js"></script>
-    <script src="js/utils.js"></script>
-    <script src="js/api.js"></script>
-    <script src="js/staff.js"></script>
+    <script type="module" src="js/staff.js"></script>
 </body>
 </html>

@@ -8,7 +8,7 @@
 function getApiBaseUrl() {
   // TODO: Replace with the actual web app URL after deployment
   // For now, we'll return a placeholder; the user must update this.
-  return 'https://script.google.com/macros/s/AKfycbw_qjk7BeKUqqPUGyB0-jDU0O4sDhJ_bhl1Cf9MsEJY1dCe8OrpDhv2YI5n9EkX-ZU/exec';
+  return 'https://script.google.com/macros/s/AKfycbwuiVXicOhjgSWhTtplBabrz2I05WXQgXDpFn3n2Nb4bx37hzua5ioMqubmxU9dEU4/exec';
 }
 
 /**

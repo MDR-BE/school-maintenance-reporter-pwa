@@ -1,6 +1,6 @@
 // ====================== Configuration ======================
 const SHEET_NAME_PATTERN = /^klusjes \d{8}$/; // Matches klusjes DDMMYYYY
-const PHOTO_FOLDER_NAME = 'Klusjes/Photos';
+const PHOTO_FOLDER_NAME = 'Klusjes_Photos';  // Single folder name (no path separator)
 // ID of the specific spreadsheet we want to use
 const TARGET_SPREADSHEET_ID = '1HtYJqAWengq_wvEbt2SE_Rx4cPwSyal5YwHbp_Z0wVY';
 // Property keys
@@ -494,12 +494,19 @@ function doPost(e) {
     const status = e.parameter.status || 'New';
 
     let photoUrls = [];
-    if (e.parameter.file) {
-      const blob = e.parameter.file;
-      const photoFolder = getPhotoFolder();
-      const file = photoFolder.createFile(blob);
-      const fileUrl = file.getUrl();
-      photoUrls.push(fileUrl);
+    // Handle file upload - Apps Script puts uploaded files in e.parameter with the field name
+    // The file comes as a Blob object
+    const uploadedFile = e.parameter.file;
+    if (uploadedFile && uploadedFile.getBytes) {
+      try {
+        const photoFolder = getPhotoFolder();
+        const file = photoFolder.createFile(uploadedFile);
+        const fileUrl = file.getUrl();
+        photoUrls.push(fileUrl);
+      } catch (fileError) {
+        console.error('Error uploading photo:', fileError);
+        // Continue without photo if upload fails
+      }
     }
 
     const taskData = {

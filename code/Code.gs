@@ -83,19 +83,12 @@ function getPhotoFolder() {
 }
 
 /**
- * Returns the maintenance worker e‑mail (set via setMaintenanceWorker).
- * @return {string} The maintenance worker e‑mail.
- */
-function getMaintenanceWorker() {
-  return PropertiesService.getScriptProperties().getProperty(MAINTENANCE_WORKER_PROPERTY) || '';
-}
-
-/**
  * Sets the maintenance worker e‑mail.
  * @param {string} email - The maintenance worker e‑mail address.
  */
 function setMaintenanceWorker(email) {
-  PropertiesService.getScriptProperties().setProperty(MAINTENANCE_WORKER_PROPERTY, email);
+  PropertiesService.getScriptProperties()
+    .setProperty(MAINTENANCE_WORKER_PROPERTY, email);
 }
 
 /**
@@ -111,10 +104,11 @@ function getLoginPassword() {
  * @param {string} password - The password to protect the PWA.
  */
 function setLoginPassword(password) {
-  if (typeof password !== 'string' || password === '') {
+  if (typeof password !== 'string' || password.trim() === '') {
     throw new Error('Password must be a non-empty string.');
   }
-  PropertiesService.getScriptProperties().setProperty(LOGIN_PASSWORD_PROPERTY, password);
+  PropertiesService.getScriptProperties()
+    .setProperty(LOGIN_PASSWORD_PROPERTY, password);
 }
 
 /**
@@ -197,14 +191,15 @@ function createToken() {
 }
 
 /**
- * Stores a token with a timestamp in the current user's properties.
+ * Stores a token with a timestamp in Script Properties.
  * @param {string} token - The token to store.
  */
 function storeToken(token) {
   if (!token || typeof token !== 'string') {
     throw new Error('Invalid token: must be a non-empty string');
   }
-  PropertiesService.getUserProperties().setProperty(token, Date.now().toString());
+  PropertiesService.getScriptProperties()
+    .setProperty(AUTH_TOKEN_PROPERTY_PREFIX + token, Date.now().toString());
 }
 
 /**
@@ -213,13 +208,18 @@ function storeToken(token) {
  * @return {boolean} True if token exists and is within TTL.
  */
 function isValidToken(token) {
-  const ts = PropertiesService.getUserProperties().getProperty(token);
+  const key = AUTH_TOKEN_PROPERTY_PREFIX + token;
+  const ts = PropertiesService.getScriptProperties().getProperty(key);
   if (!ts) return false;
-  return (Date.now() - parseInt(ts, 10)) < TOKEN_TTL_MS;
+  const valid = (Date.now() - parseInt(ts, 10)) < TOKEN_TTL_MS;
+  if (!valid) {
+    PropertiesService.getScriptProperties().deleteProperty(key);
+  }
+  return valid;
 }
 
 /**
- * Removes a token from user properties (logout).
+ * Removes a token from Script Properties (logout).
  * @param {string} token - The token to remove.
  */
 function removeToken(token) {
@@ -227,19 +227,31 @@ function removeToken(token) {
     // Invalid token, nothing to remove
     return;
   }
-  PropertiesService.getUserProperties().deleteProperty(token);
+  PropertiesService.getScriptProperties()
+    .deleteProperty(AUTH_TOKEN_PROPERTY_PREFIX + token);
 }
 
 /**
- * Extracts the pwa_auth token from the request cookie.
+ * Extracts the pwa_auth token from the request cookie or query parameter.
  * @param {Object} e - The event parameter.
  * @return {string|null} The token if present, otherwise null.
  */
 function getAuthTokenFromRequest(e) {
-  // Handle case where e or e.cookie is undefined
-  if (!e || !e.cookie) return null;
-  const match = e.cookie.match(/(?:^|;)\s*pwa_auth=([^;]+)/);
-  return match ? decodeURIComponent(match[1]) : null;
+  // Handle case where e is undefined
+  if (!e) return null;
+  
+  // First check query parameter (for cross-domain requests)
+  if (e.parameter && e.parameter.token) {
+    return decodeURIComponent(e.parameter.token);
+  }
+  
+  // Then check cookie (for same-domain requests)
+  if (e.cookie) {
+    const match = e.cookie.match(/(?:^|;)\s*pwa_auth=([^;]+)/);
+    return match ? decodeURIComponent(match[1]) : null;
+  }
+  
+  return null;
 }
 
 /**
@@ -415,22 +427,14 @@ function doPost(e) {
     if (password === correct) {
       const token = createToken();
       storeToken(token);
-      // Return HTML that sets cookie and redirects to frontend
-      return addCorsHeadersHtml(
-        HtmlService.createHtmlOutput(`
-          <!DOCTYPE html>
-          <html>
-            <head><meta charset="UTF-8"></head>
-            <body>
-              <script>
-                // Set cookie (httpOnly cannot be set from JS, but we can set regular cookie)
-                document.cookie = "pwa_auth=" + "${token}" + "; path=/; max-age=${15*60}; SameSite=Lax";
-                // Redirect to frontend
-                window.location.href = "' + getFrontendUrl() + '";
-              </script>
-            </body>
-          </html>
-        `)
+      // Return JSON with success and token (frontend expects JSON response)
+      return addCorsHeaders(
+        ContentService
+          .createTextOutput(JSON.stringify({
+            success: true,
+            token: token
+          }))
+          .setMimeType(ContentService.MimeType.JSON)
       );
     } else {
       return addCorsHeaders(
@@ -518,14 +522,6 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.JSON)
     );
   }
-}
-
-/**
- * Function to set up the maintenance worker e‑mail (for initial setup).
- * @param {string} email - The maintenance worker e‑mail address.
- */
-function setMaintenanceWorker(email) {
-  PropertiesService.getScriptProperties().setProperty(MAINTENANCE_WORKER_PROPERTY, email);
 }
 
 /**
@@ -709,7 +705,7 @@ function createTask(taskData) {
     taskData.required_materials || '',             // Benodigd materiaal (3)
     mapUrgencyToPriority(taskData.urgency) || 'niet zo dringend', // prioriteit (4)
     mapStatusToOpvolging(taskData.status) || '',   // opvolging (5)
-    taskData.photo_urls ? taskData.photo_urls.join(',') : '', // photo_urls (6)
+    taskData.photo_urls || '', // photo_urls (6) - already a string
     taskData.maintenance_notes || '',              // Opmerkingen (7)
     taskData.created_at || new Date().toISOString(), // datum gemaakt (8)
     taskData.updated_at || new Date().toISOString(), // datum update (9)
@@ -781,7 +777,7 @@ function updateTask(taskId, updates) {
     row[headerIndices['opvolging'] || 5] = mapStatusToOpvolging(updates.status);
   }
   if (updates.photo_urls !== undefined) {
-    row[headerIndices['photo_urls'] || 6] = updates.photo_urls ? updates.photo_urls.join(',') : '';
+    row[headerIndices['photo_urls'] || 6] = updates.photo_urls || '';
   }
   if (updates.maintenance_notes !== undefined) {
     row[headerIndices['Opmerkingen'] || 7] = updates.maintenance_notes;
@@ -831,21 +827,37 @@ function getTasks(filters, limit, offset) {
       task[header] = row[headerIndices[header]];
     }
 
-    // Apply filters
+    // Map Dutch values to PWA format BEFORE filtering
+    const pwaTask = {
+      id: task.task_id || '',
+      description: task.Omschrijving || '',
+      requester_name: task['naam aanvrager'] || '',
+      location: task['Welke klas? Welk lokaal?'] || '',
+      required_materials: task['Benodigd materiaal'] || '',
+      urgency: mapPriorityToUrgency(task.prioriteit) || 'Normal',
+      status: mapOpvolgingToStatus(task.opvolging) || 'New',
+      photo_urls: task.photo_urls ? task.photo_urls.split(',').filter(url => url.trim() !== '') : [],
+      maintenance_notes: task.Opmerkingen || '',
+      created_at: task['datum gemaakt'] || '',
+      updated_at: task['datum update'] || '',
+      completed_at: task['datum opgelost'] || ''
+    };
+
+    // Apply filters on PWA format fields
     if (filters) {
-      if (filters.status && task.status !== filters.status) {
+      if (filters.status && pwaTask.status !== filters.status) {
         continue;
       }
-      if (filters.urgency && task.urgency !== filters.urgency) {
+      if (filters.urgency && pwaTask.urgency !== filters.urgency) {
         continue;
       }
-      if (filters.location && !task.location.toLowerCase().includes(filters.location.toLowerCase())) {
+      if (filters.location && !pwaTask.location.toLowerCase().includes(filters.location.toLowerCase())) {
         continue;
       }
       // Add more filters as needed
     }
 
-    tasks.push(task);
+    tasks.push(pwaTask);
 
     // Apply limit and offset
     if (offset && tasks.length <= offset) {
@@ -858,24 +870,7 @@ function getTasks(filters, limit, offset) {
     }
   }
 
-  // Now we need to map the Dutch values back to PWA values for urgency and status.
-  // Also, we need to split the photo_urls string into an array if needed.
-  return tasks.map(task => {
-    return {
-      id: task.task_id || '',
-      description: task.Omschrijving || '',
-      requester_name: task['naam aanvrager'] || '',
-      location: task['Welke klas? Welk lokaal?'] || '',
-      required_materials: task['Benodigd materiaal'] || '',
-      urgency: mapPriorityToUrgency(task.prioritet) || 'Normal',
-      status: mapOpvolgingToStatus(task.opvolging) || 'New',
-      photo_urls: task.photo_urls ? task.photo_urls.split(',').filter(url => url.trim() !== '') : [],
-      maintenance_notes: task.Opmerkingen || '',
-      created_at: task['datum gemaakt'] || '',
-      updated_at: task['datum update'] || '',
-      completed_at: task['datum opgelost'] || ''
-    };
-  });
+  return tasks;
 }
 
 /**

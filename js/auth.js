@@ -1,22 +1,26 @@
-/* auth.js – simple cookie‑based protection for the PWA */
-/* Returns true if a valid token is present, false otherwise */
+/* auth.js – token-based protection for the PWA */
+const TOKEN_KEY = 'pwa_auth_token';
+
+/* Returns true if a valid token is present in localStorage, false otherwise */
 function hasValidAuthToken() {
-  const match = document.cookie.match(/(?:^|;)\s*pwa_auth=([^;]+)/);
-  if (!match) return false;
-  const token = decodeURIComponent(match[1]);
-  // Validate by calling the script's validation endpoint (HEAD request)
-  // We reuse the same endpoint the Apps Script uses for issuing tokens.
-  const apiUrl = getApiBaseUrl(); // defined in utils.js
-  let valid = false;
-  const xhr = new XMLHttpRequest();
-  xhr.open('HEAD', apiUrl + '?action=validate&token=' + encodeURIComponent(token), false);
-  xhr.onreadystatechange = function () {
-    if (xhr.readyState === XMLHttpRequest.DONE) {
-      valid = (xhr.status === 200);
-    }
-  };
-  xhr.send();
-  return valid;
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (!token) return false;
+  return true; // Token validity is checked server-side
+}
+
+/* Get the stored token */
+function getAuthToken() {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+/* Store the token */
+function setAuthToken(token) {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+/* Remove the token (logout) */
+function clearAuthToken() {
+  localStorage.removeItem(TOKEN_KEY);
 }
 
 /* Show a login modal if no valid token */
@@ -74,8 +78,8 @@ function requireAuth() {
         .then(r => r.json())
         .then(data => {
           if (data.success) {
-            // Set cookie and reload the page
-            document.cookie = "pwa_auth=" + data.token + "; path=/; max-age=" + (15*60) + "; SameSite=Lax";
+            // Store token and reload the page
+            setAuthToken(data.token);
             location.reload();
           } else {
             errorDiv.textContent = data.error || 'Ongeldig wachtwoord';
@@ -86,6 +90,33 @@ function requireAuth() {
         });
     });
   }
+}
+
+/* API fetch wrapper that automatically includes the auth token */
+async function apiFetch(endpoint, options = {}) {
+  const token = getAuthToken();
+  if (!token) {
+    throw new Error('No auth token available');
+  }
+  
+  const url = new URL(getApiBaseUrl() + endpoint);
+  url.searchParams.set('token', token);
+  
+  const response = await fetch(url.toString(), {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers
+    }
+  });
+  
+  if (response.status === 401 || response.status === 403) {
+    clearAuthToken();
+    location.reload();
+    throw new Error('Authentication failed');
+  }
+  
+  return response;
 }
 
 /* Run on every page load */

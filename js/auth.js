@@ -92,32 +92,5 @@ function requireAuth() {
   }
 }
 
-/* API fetch wrapper that automatically includes the auth token */
-async function apiFetch(endpoint, options = {}) {
-  const token = getAuthToken();
-  if (!token) {
-    throw new Error('No auth token available');
-  }
-  
-  const url = new URL(getApiBaseUrl() + endpoint);
-  url.searchParams.set('token', token);
-  
-  const response = await fetch(url.toString(), {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers
-    }
-  });
-  
-  if (response.status === 401 || response.status === 403) {
-    clearAuthToken();
-    location.reload();
-    throw new Error('Authentication failed');
-  }
-  
-  return response;
-}
-
 /* Run on every page load */
 requireAuth();

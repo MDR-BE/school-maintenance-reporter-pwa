@@ -20,7 +20,7 @@ async function apiFetch(endpoint, options = {}, useCache = false) {
   url.searchParams.set('token', token);
 
   const cacheKey = url.toString() + JSON.stringify(options);
-  
+
   // Check cache for GET requests
   if (useCache && (!options.method || options.method === 'GET')) {
     const cached = apiCache.get(cacheKey);
@@ -29,12 +29,19 @@ async function apiFetch(endpoint, options = {}, useCache = false) {
     }
   }
 
+  // Prepare headers
+  const headers = {
+    ...options.headers
+  };
+
+  // Set Content-Type appropriately
+  if (!(options.body instanceof FormData) && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
+
   const response = await fetch(url.toString(), {
     ...options,
-    headers: {
-      'Content-Type': options.body instanceof FormData ? undefined : 'application/json',
-      ...options.headers
-    }
+    headers
   });
 
   if (response.status === 401 || response.status === 403) {
@@ -87,27 +94,61 @@ async function fetchTask(taskId) {
 }
 
 /**
- * Create a new task
+ * Convert a File object to the format expected by Apps Script (Base64)
+ * @param {File} file
+ * @returns {Promise<Object>} {filename, mimeType, base64}
+ */
+async function photoToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      const dataUrl = reader.result;
+
+      // Remove "data:image/jpeg;base64," prefix
+      const base64 = dataUrl.split(',')[1];
+
+      resolve({
+        filename: file.name,
+        mimeType: file.type,
+        base64: base64
+      });
+    };
+
+    reader.onerror = () => {
+      reject(new Error(`Could not read photo: ${file.name}`));
+    };
+
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Creates a new task and optionally uploads one or more photos.
  * @param {Object} taskData - Task data (description, requester_name, location, etc.)
- * @param {File} photo - Optional photo file
+ * @param {File|File[]|null} photos - Optional photo file(s)
  * @returns {Promise<Object>} Result with taskId
  */
-async function createTask(taskData, photo = null) {
-  const formData = new FormData();
-  
-  Object.entries(taskData).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && value !== '') {
-      formData.append(key, value);
-    }
-  });
-  
-  if (photo) {
-    formData.append('file', photo);
-  }
+async function createTask(taskData, photos = null) {
+  const photoArray = photos
+    ? (Array.isArray(photos) ? photos : [photos])
+    : [];
+
+  const convertedPhotos = await Promise.all(
+    photoArray.map(photoToBase64)
+  );
+
+  const payload = {
+    ...taskData,
+    photos: convertedPhotos
+  };
 
   return apiFetch('', {
     method: 'POST',
-    body: formData
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
   });
 }
 
@@ -119,9 +160,12 @@ async function createTask(taskData, photo = null) {
  */
 async function updateTask(taskId, updates) {
   const params = new URLSearchParams({ action: 'update', id: taskId });
-  
+
   return apiFetch('?' + params.toString(), {
     method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
     body: JSON.stringify(updates)
   });
 }

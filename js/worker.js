@@ -70,6 +70,19 @@ async function loadTasks() {
 }
 
 /**
+ * Parse photo_urls string into array
+ * @param {string} photoUrlsString - Comma-separated photo URLs from backend
+ * @returns {Array<string>} Array of photo URLs
+ */
+function parsePhotoUrls(photoUrlsString) {
+  if (!photoUrlsString) return [];
+  return String(photoUrlsString)
+    .split(',')
+    .map(url => url.trim())
+    .filter(Boolean);
+}
+
+/**
  * Render the list of tasks.
  */
 function renderTaskList() {
@@ -148,7 +161,8 @@ function renderTaskList() {
     actionsDiv.appendChild(notesBtn);
 
     // Optional: view photos
-    if (task.photo_urls && task.photo_urls.length > 0) {
+    const photoUrls = parsePhotoUrls(task.photo_urls);
+    if (photoUrls.length > 0) {
       const photosBtn = document.createElement('button');
       photosBtn.className = 'status-btn';
       photosBtn.textContent = 'View Photos';
@@ -211,7 +225,8 @@ async function showTaskDetail(task) {
   });
 
   // Photos
-  if (task.photo_urls && task.photo_urls.length > 0) {
+  const photoUrls = parsePhotoUrls(task.photo_urls);
+  if (photoUrls.length > 0) {
     const photosHeading = document.createElement('h3');
     photosHeading.textContent = 'Photos';
     taskDetailContent.appendChild(photosHeading);
@@ -221,7 +236,7 @@ async function showTaskDetail(task) {
     photosDiv.style.flexWrap = 'wrap';
     photosDiv.style.gap = '0.5rem';
 
-    task.photo_urls.forEach(url => {
+    photoUrls.forEach(url => {
       const img = document.createElement('img');
       img.src = url;
       img.style.maxWidth = '150px';
@@ -261,7 +276,7 @@ async function showTaskDetail(task) {
   completeBtn.textContent = task.status === 'Completed' ? 'Reopen' : 'Mark as Completed';
   completeBtn.addEventListener('click', () => {
     if (task.status === 'Completed') {
-      updateTaskStatus(task.id, 'New');
+      updateTaskStatus(task.id, 'New'); // or maybe 'In progress'? We'll use 'New' for simplicity.
     } else {
       updateTaskStatus(task.id, 'Completed');
     }
@@ -419,7 +434,8 @@ function showPhotosModal(task) {
   const photosContainer = modal.querySelector('#photos-container');
   const closeBtn = modal.querySelector('.close-btn');
 
-  task.photo_urls.forEach(url => {
+  const photoUrls = parsePhotoUrls(task.photo_urls);
+  photoUrls.forEach(url => {
     const img = document.createElement('img');
     img.src = url;
     img.style.maxWidth = '200px';

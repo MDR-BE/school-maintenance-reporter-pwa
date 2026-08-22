@@ -540,7 +540,15 @@ function doPost(e) {
                 photoUrls.push(fileUrl);
               } catch (fileError) {
                 console.error('Error uploading photo:', fileError);
-                // Continue without this photo if upload fails
+                // Fail the request so user knows photo upload failed
+                return addCorsHeaders(
+                  ContentService
+                    .createTextOutput(JSON.stringify({ 
+                      success: false, 
+                      error: 'Photo upload failed: ' + fileError.message 
+                    }))
+                    .setMimeType(ContentService.MimeType.JSON)
+                );
               }
             }
           }
@@ -590,136 +598,6 @@ function doPost(e) {
  * @param {string} boundary - The multipart boundary.
  * @return {Object} Parsed fields and file.
  */
-function parseMultipartData(data, boundary) {
-  const result = {};
-  const delimiter = '--' + boundary;
-  const parts = data.split(delimiter);
-  
-  for (const part of parts) {
-    if (part.trim() === '' || part.trim() === '--') continue;
-    
-    const headerEnd = part.indexOf('\r\n\r\n');
-    if (headerEnd === -1) continue;
-    
-    const headers = part.substring(0, headerEnd);
-    const content = part.substring(headerEnd + 4); // +4 for \r\n\r\n
-    // Remove trailing \r\n
-    const cleanContent = content.replace(/\r\n$/, '');
-    
-    // Parse Content-Disposition header
-    const dispositionMatch = headers.match(/name="([^"]+)"/);
-    if (!dispositionMatch) continue;
-    
-    const fieldName = dispositionMatch[1];
-    
-    // Check if it's a file
-    const filenameMatch = headers.match(/filename="([^"]+)"/);
-    
-    if (filenameMatch) {
-      // It's a file - convert string content to blob
-      // The content is a binary string, we need to convert it
-      const blob = Utilities.newBlob(cleanContent, 'application/octet-stream', filenameMatch[1]);
-      result.file = {
-        name: filenameMatch[1],
-        blob: blob
-      };
-    } else {
-      // Regular form field
-      result[fieldName] = cleanContent;
-    }
-  }
-
-  }
-
-  /**
- * Function to create a new quarter sheet and copy unfinished tasks.
- * This would be called manually or via a trigger.
- */
-function createNewQuarterSheet() {
-  const ss = SpreadsheetApp.openById(TARGET_SPREADSHEET_ID);
-  const today = new Date();
-  const day = String(today.getDate()).padStart(2, '0');
-  const month = String(today.getMonth() + 1).padStart(2, '0');
-  const year = today.getFullYear();
-  const sheetName = `klusjes ${day}${month}${year}`;
-
-  // Check if a sheet with this name already exists
-  const existingSheet = ss.getSheetByName(sheetName);
-  if (existingSheet) {
-    return; // Sheet already exists for today
-  }
-
-  // Find the most recent previous sheet (to copy formatting from)
-  const sheets = ss.getSheets();
-  let previousSheet = null;
-  let latestDate = null;
-
-  for (const sheet of sheets) {
-    const name = sheet.getName();
-    if (SHEET_NAME_PATTERN.test(name)) {
-      const dateStr = name.substring(8);
-      const day = parseInt(dateStr.substring(0, 2), 10);
-      const month = parseInt(dateStr.substring(2, 4), 10);
-      const year = parseInt(dateStr.substring(4, 8), 10);
-      const date = new Date(year, month - 1, day);
-      if (!latestDate || date > latestDate) {
-        latestDate = date;
-        previousSheet = sheet;
-      }
-    }
-  }
-
-  // Create new sheet
-  const newSheet = ss.insertSheet(sheetName);
-  
-  // Add headers FIRST so they exist when we copy formatting
-  const headers = [
-    'Omschrijving',
-    'naam aanvrager',
-    'Welke klas? Welk lokaal?',
-    'Benodigd materiaal',
-    'prioriteit',
-    'opvolging',
-    'photo_urls',
-    'Opmerkingen',
-    'datum gemaakt',
-    'datum update',
-    'datum opgelost',
-    'task_id'
-  ];
-  newSheet.appendRow(headers);
-  
-  // Freeze header row
-  newSheet.setFrozenRows(1);
-
-  if (previousSheet) {
-    // Copy formatting from previous sheet AFTER headers are added
-    copySheetFormatting(previousSheet, newSheet);
-  }
-
-  // Copy unfinished tasks from previous sheet to new sheet
-  if (previousSheet) {
-    const previousData = previousSheet.getDataRange().getValues();
-    const previousHeaders = previousData[0];
-    const opvolgingColIndex = previousHeaders.indexOf('opvolging');
-    
-    if (opvolgingColIndex === -1) {
-      // If we can't find opvolging, copy all rows (skip header)
-      for (let i = 1; i < previousData.length; i++) {
-        newSheet.appendRow(previousData[i]);
-      }
-    } else {
-      for (let i = 1; i < previousData.length; i++) {
-        const row = previousData[i];
-        const opvolging = row[opvolgingColIndex];
-        const status = mapOpvolgingToStatus(opvolging);
-        if (status !== 'Completed') {
-          newSheet.appendRow(row);
-        }
-      }
-    }
-  }
-}
 
 /**
  * Copies formatting from source sheet to target sheet.

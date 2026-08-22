@@ -1,15 +1,17 @@
 // Service Worker for School Maintenance PWA
-const CACHE_NAME = 'maintenance-pwa-cache-v1';
+const CACHE_NAME = 'maintenance-pwa-cache-v2';
 const urlsToCache = [
   './',
-  './html/index.html',
-  './html/staff.html',
-  './html/worker.html',
+  './index.html',
+  './staff.html',
+  './worker.html',
   './css/styles.css',
   './js/main.js',
   './js/staff.js',
   './js/worker.js',
   './js/utils.js',
+  './js/api.js',
+  './js/auth.js',
   './manifest.json'
 ];
 
@@ -19,10 +21,42 @@ self.addEventListener('install', event => {
     caches.open(CACHE_NAME)
       .then(cache => cache.addAll(urlsToCache))
   );
+  // Skip waiting to activate immediately
+  self.skipWaiting();
 });
 
 // Fetch event - serve from cache, fallback to network
 self.addEventListener('fetch', event => {
+  // Skip non-GET requests (POST, PUT, DELETE, etc.)
+  if (event.request.method !== 'GET') {
+    return;
+  }
+
+  // Network-first for HTML/JS files to avoid stale code
+  const isHtmlOrJs = event.request.destination === 'document' || 
+                     event.request.destination === 'script' ||
+                     event.request.destination === 'style';
+
+  if (isHtmlOrJs) {
+    event.respondWith(
+      fetch(event.request)
+        .then(response => {
+          // Cache the fresh response
+          const responseClone = response.clone();
+          caches.open(CACHE_NAME).then(cache => {
+            cache.put(event.request, responseClone);
+          });
+          return response;
+        })
+        .catch(() => {
+          // Fallback to cache if network fails
+          return caches.match(event.request);
+        })
+    );
+    return;
+  }
+
+  // Cache-first for other assets (images, fonts, etc.)
   event.respondWith(
     caches.match(event.request)
       .then(response => {
@@ -50,4 +84,6 @@ self.addEventListener('activate', event => {
       );
     })
   );
+  // Take control of all clients immediately
+  self.clients.claim();
 });

@@ -40,49 +40,23 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       try {
-        // Prepare photos array for base64 upload
-        const photos = [];
-        if (photoInput) {
-          // Convert file to base64
-          const base64 = await fileToBase64(photoInput);
-          photos.push({
-            filename: photoInput.name,
-            mimeType: photoInput.type,
-            base64: base64
-          });
-        }
-
-        // Prepare JSON data for submission
+        // Prepare task data for API
         const taskData = {
           description: description,
           requester_name: requester_name,
           location: location,
           required_materials: required_materials,
           urgency: urgency,
-          status: status,
-          photos: photos
+          status: status
         };
 
-        // Send to backend with auth token
-        const apiUrl = getApiBaseUrl(); // from utils.js
-        const token = getAuthToken(); // from auth.js
-        
-        const url = new URL(apiUrl);
-        if (token) {
-          url.searchParams.set('token', token);
-        }
-        
-        const response = await fetch(url.toString(), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(taskData)
-        });
+        // Handle photos
+        const photos = photoInput ? [photoInput] : [];
 
-        const result = await response.json();
+        // Use shared API layer
+        const result = await createTask(taskData, photos);
 
-        if (response.ok && result.success) {
+        if (result.success) {
           showMessage('form-message', 'Your report has been received and added to the maintenance list.', 'success');
           form.reset();
           // Optionally, show the task ID
@@ -105,21 +79,3 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
-
-/**
- * Convert a File object to base64 string
- * @param {File} file - The file to convert
- * @returns {Promise<string>} Base64 string (without data URL prefix)
- */
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      // Remove the data URL prefix (e.g., "data:image/jpeg;base64,")
-      const base64 = reader.result.split(',')[1];
-      resolve(base64);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}

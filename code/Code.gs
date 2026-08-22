@@ -542,8 +542,35 @@ function createNewQuarterSheet() {
     return; // Sheet already exists for today
   }
 
+  // Find the most recent previous sheet (to copy formatting from)
+  const sheets = ss.getSheets();
+  let previousSheet = null;
+  let latestDate = null;
+
+  for (const sheet of sheets) {
+    const name = sheet.getName();
+    if (SHEET_NAME_PATTERN.test(name)) {
+      const dateStr = name.substring(8);
+      const day = parseInt(dateStr.substring(0, 2), 10);
+      const month = parseInt(dateStr.substring(2, 4), 10);
+      const year = parseInt(dateStr.substring(4, 8), 10);
+      const date = new Date(year, month - 1, day);
+      if (!latestDate || date > latestDate) {
+        latestDate = date;
+        previousSheet = sheet;
+      }
+    }
+  }
+
   // Create new sheet
   const newSheet = ss.insertSheet(sheetName);
+  
+  if (previousSheet) {
+    // Copy formatting from previous sheet BEFORE adding data
+    copySheetFormatting(previousSheet, newSheet);
+  }
+  
+  // Add headers
   const headers = [
     'Omschrijving',
     'naam aanvrager',
@@ -559,33 +586,16 @@ function createNewQuarterSheet() {
     'task_id'
   ];
   newSheet.appendRow(headers);
+  
+  // Freeze header row
+  newSheet.setFrozenRows(1);
 
-  // Get the most recent previous sheet (excluding the new one we just created)
-  const sheets = ss.getSheets();
-  let previousSheet = null;
-  let latestDate = null;
-
-  for (const sheet of sheets) {
-    const name = sheet.getName();
-    if (name === sheetName) continue; // skip the new sheet
-    if (SHEET_NAME_PATTERN.test(name)) {
-      const dateStr = name.substring(8);
-      const day = parseInt(dateStr.substring(0, 2), 10);
-      const month = parseInt(dateStr.substring(2, 4), 10);
-      const year = parseInt(dateStr.substring(4, 8), 10);
-      const date = new Date(year, month - 1, day);
-      if (!latestDate || date > latestDate) {
-        latestDate = date;
-        previousSheet = sheet;
-      }
-    }
-  }
-
+  // Copy unfinished tasks from previous sheet to new sheet
   if (previousSheet) {
-    // Copy unfinished tasks from previous sheet to new sheet
     const previousData = previousSheet.getDataRange().getValues();
     const previousHeaders = previousData[0];
     const opvolgingColIndex = previousHeaders.indexOf('opvolging');
+    
     if (opvolgingColIndex === -1) {
       // If we can't find opvolging, copy all rows (skip header)
       for (let i = 1; i < previousData.length; i++) {
@@ -601,6 +611,115 @@ function createNewQuarterSheet() {
         }
       }
     }
+  }
+}
+
+/**
+ * Copies formatting from source sheet to target sheet.
+ * Includes: column widths, frozen rows, data validation, conditional formatting, 
+ * and basic cell formatting (borders, backgrounds, fonts).
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sourceSheet - The sheet to copy formatting from
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} targetSheet - The sheet to apply formatting to
+ */
+function copySheetFormatting(sourceSheet, targetSheet) {
+  const sourceRange = sourceSheet.getDataRange();
+  const numRows = sourceRange.getNumRows();
+  const numCols = sourceRange.getNumColumns();
+  
+  if (numRows === 0 || numCols === 0) return;
+  
+  // 1. Copy column widths
+  for (let col = 1; col <= numCols; col++) {
+    const width = sourceSheet.getColumnWidth(col);
+    if (width > 0) {
+      targetSheet.setColumnWidth(col, width);
+    }
+  }
+  
+  // 2. Copy frozen rows
+  const frozenRows = sourceSheet.getFrozenRows();
+  if (frozenRows > 0) {
+    targetSheet.setFrozenRows(frozenRows);
+  }
+  
+  // 3. Copy data validation rules (dropdowns)
+  const dataValidations = sourceRange.getDataValidations();
+  if (dataValidations) {
+    const targetRange = targetSheet.getRange(1, 1, numRows, numCols);
+    targetRange.setDataValidations(dataValidations);
+  }
+  
+  // 4. Copy conditional formatting rules
+  const conditionalFormats = sourceSheet.getConditionalFormatRules();
+  if (conditionalFormats && conditionalFormats.length > 0) {
+    const targetConditionalFormats = [];
+    for (const rule of conditionalFormats) {
+      // Clone the rule but apply to target sheet ranges
+      const ranges = rule.getRanges();
+      const newRanges = [];
+      for (const range of ranges) {
+        // Create corresponding range in target sheet
+        const newRange = targetSheet.getRange(
+          range.getRow(),
+          range.getColumn(),
+          range.getNumRows(),
+          range.getNumColumns()
+        );
+        newRanges.push(newRange);
+      }
+      // Copy the rule with new ranges
+      const newRule = rule.copy()
+        .setRanges(newRanges)
+        .build();
+      targetConditionalFormats.push(newRule);
+    }
+    targetSheet.setConditionalFormatRules(targetConditionalFormats);
+  }
+  
+  // 5. Copy cell formatting for header row and first few data rows
+  // This copies backgrounds, fonts, borders, number formats, etc.
+  const headerRow = sourceSheet.getRange(1, 1, 1, numCols);
+  const targetHeaderRow = targetSheet.getRange(1, 1, 1, numCols);
+  
+  // Copy header formatting
+  targetHeaderRow.setBackgrounds(headerRow.getBackgrounds());
+  targetHeaderRow.setFontFamilies(headerRow.getFontFamilies());
+  targetHeaderRow.setFontSizes(headerRow.getFontSizes());
+  targetHeaderRow.setFontWeights(headerRow.getFontWeights());
+  targetHeaderRow.setFontColors(headerRow.getFontColors());
+  targetHeaderRow.setHorizontalAlignments(headerRow.getHorizontalAlignments());
+  targetHeaderRow.setVerticalAlignments(headerRow.getVerticalAlignments());
+  targetHeaderRow.setNumberFormats(headerRow.getNumberFormats());
+  targetHeaderRow.setBorders(
+    headerRow.getBorderTop() ? true : false,
+    headerRow.getBorderBottom() ? true : false,
+    headerRow.getBorderLeft() ? true : false,
+    headerRow.getBorderRight() ? true : false,
+    headerRow.getBorderVertical() ? true : false,
+    headerRow.getBorderHorizontal() ? true : false
+  );
+  
+  // Copy formatting for first data row (as template for data rows)
+  if (numRows > 1) {
+    const firstDataRow = sourceSheet.getRange(2, 1, 1, numCols);
+    const targetFirstDataRow = targetSheet.getRange(2, 1, 1, numCols);
+    
+    targetFirstDataRow.setBackgrounds(firstDataRow.getBackgrounds());
+    targetFirstDataRow.setFontFamilies(firstDataRow.getFontFamilies());
+    targetFirstDataRow.setFontSizes(firstDataRow.getFontSizes());
+    targetFirstDataRow.setFontWeights(firstDataRow.getFontWeights());
+    targetFirstDataRow.setFontColors(firstDataRow.getFontColors());
+    targetFirstDataRow.setHorizontalAlignments(firstDataRow.getHorizontalAlignments());
+    targetFirstDataRow.setVerticalAlignments(firstDataRow.getVerticalAlignments());
+    targetFirstDataRow.setNumberFormats(firstDataRow.getNumberFormats());
+    targetFirstDataRow.setBorders(
+      firstDataRow.getBorderTop() ? true : false,
+      firstDataRow.getBorderBottom() ? true : false,
+      firstDataRow.getBorderLeft() ? true : false,
+      firstDataRow.getBorderRight() ? true : false,
+      firstDataRow.getBorderVertical() ? true : false,
+      firstDataRow.getBorderHorizontal() ? true : false
+    );
   }
 }
 

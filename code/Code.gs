@@ -565,12 +565,7 @@ function createNewQuarterSheet() {
   // Create new sheet
   const newSheet = ss.insertSheet(sheetName);
   
-  if (previousSheet) {
-    // Copy formatting from previous sheet BEFORE adding data
-    copySheetFormatting(previousSheet, newSheet);
-  }
-  
-  // Add headers
+  // Add headers FIRST so they exist when we copy formatting
   const headers = [
     'Omschrijving',
     'naam aanvrager',
@@ -589,6 +584,11 @@ function createNewQuarterSheet() {
   
   // Freeze header row
   newSheet.setFrozenRows(1);
+
+  if (previousSheet) {
+    // Copy formatting from previous sheet AFTER headers are added
+    copySheetFormatting(previousSheet, newSheet);
+  }
 
   // Copy unfinished tasks from previous sheet to new sheet
   if (previousSheet) {
@@ -681,45 +681,15 @@ function copySheetFormatting(sourceSheet, targetSheet) {
   const headerRow = sourceSheet.getRange(1, 1, 1, numCols);
   const targetHeaderRow = targetSheet.getRange(1, 1, 1, numCols);
   
-  // Copy header formatting
-  targetHeaderRow.setBackgrounds(headerRow.getBackgrounds());
-  targetHeaderRow.setFontFamilies(headerRow.getFontFamilies());
-  targetHeaderRow.setFontSizes(headerRow.getFontSizes());
-  targetHeaderRow.setFontWeights(headerRow.getFontWeights());
-  targetHeaderRow.setFontColors(headerRow.getFontColors());
-  targetHeaderRow.setHorizontalAlignments(headerRow.getHorizontalAlignments());
-  targetHeaderRow.setVerticalAlignments(headerRow.getVerticalAlignments());
-  targetHeaderRow.setNumberFormats(headerRow.getNumberFormats());
-  targetHeaderRow.setBorders(
-    headerRow.getBorderTop() ? true : false,
-    headerRow.getBorderBottom() ? true : false,
-    headerRow.getBorderLeft() ? true : false,
-    headerRow.getBorderRight() ? true : false,
-    headerRow.getBorderVertical() ? true : false,
-    headerRow.getBorderHorizontal() ? true : false
-  );
+  // Copy header formatting using copyTo with PASTE_FORMAT (copies all formatting including borders)
+  headerRow.copyTo(targetHeaderRow, SpreadsheetApp.CopyPasteType.PASTE_FORMAT, false);
   
   // Copy formatting for first data row (as template for data rows)
   if (numRows > 1) {
     const firstDataRow = sourceSheet.getRange(2, 1, 1, numCols);
     const targetFirstDataRow = targetSheet.getRange(2, 1, 1, numCols);
     
-    targetFirstDataRow.setBackgrounds(firstDataRow.getBackgrounds());
-    targetFirstDataRow.setFontFamilies(firstDataRow.getFontFamilies());
-    targetFirstDataRow.setFontSizes(firstDataRow.getFontSizes());
-    targetFirstDataRow.setFontWeights(firstDataRow.getFontWeights());
-    targetFirstDataRow.setFontColors(firstDataRow.getFontColors());
-    targetFirstDataRow.setHorizontalAlignments(firstDataRow.getHorizontalAlignments());
-    targetFirstDataRow.setVerticalAlignments(firstDataRow.getVerticalAlignments());
-    targetFirstDataRow.setNumberFormats(firstDataRow.getNumberFormats());
-    targetFirstDataRow.setBorders(
-      firstDataRow.getBorderTop() ? true : false,
-      firstDataRow.getBorderBottom() ? true : false,
-      firstDataRow.getBorderLeft() ? true : false,
-      firstDataRow.getBorderRight() ? true : false,
-      firstDataRow.getBorderVertical() ? true : false,
-      firstDataRow.getBorderHorizontal() ? true : false
-    );
+    firstDataRow.copyTo(targetFirstDataRow, SpreadsheetApp.CopyPasteType.PASTE_FORMAT, false);
   }
 }
 

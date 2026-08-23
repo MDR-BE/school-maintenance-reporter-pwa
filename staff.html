@@ -17,18 +17,8 @@
             </div>
             
             <div class="form-group">
-                <label for="requester_name">Naam aanvrager *</label>
-                <input type="text" id="requester_name" name="requester_name" required>
-            </div>
-            
-            <div class="form-group">
                 <label for="location">Welke klas? Welk lokaal? *</label>
                 <input type="text" id="location" name="location" required>
-            </div>
-            
-            <div class="form-group">
-                <label for="required_materials">Benodigd materiaal</label>
-                <input type="text" id="required_materials" name="required_materials">
             </div>
             
             <div class="form-group">
@@ -42,20 +32,13 @@
             </div>
             
             <div class="form-group">
-                <label for="status">Opvolging</label>
-                <select id="status" name="status">
-                    <option value="New">New</option>
-                    <option value="Planned">Planned</option>
-                    <option value="In progress">In progress</option>
-                    <option value="Waiting for materials">Waiting for materials</option>
-                    <option value="Completed">Completed</option>
-                </select>
-            </div>
-            
-            <div class="form-group">
-                <label for="photo">Foto (optioneel)</label>
-                <input type="file" id="photo" name="photo" accept="image/jpeg,image/png,image/webp">
-                <div id="photo-preview" style="margin-top:0.5rem;"></div>
+                <label for="photo">Foto's (optioneel, max 3)</label>
+                <div class="photo-upload">
+                    <input type="file" id="photo" name="photo" accept="image/jpeg,image/png,image/webp" multiple>
+                    <button type="button" id="capturePhoto" class="cancel-btn">Foto maken</button>
+                    <div id="photo-preview" style="margin-top:0.5rem;"></div>
+                </div>
+                <small>Maximaal 3 foto's, elk max 5MB</small>
             </div>
             
             <button type="submit" class="submit-btn">Issue melden</button>

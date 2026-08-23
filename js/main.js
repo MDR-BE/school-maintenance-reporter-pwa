@@ -1,6 +1,7 @@
 // main.js - Main entry point for the Maintenance PWA (ES Module)
 
 import { hasValidAuthToken, requireAuth } from './auth.js';
+import { requestQueue } from './utils.js';
 
 // Register service worker
 if ('serviceWorker' in navigator) {
@@ -14,6 +15,23 @@ if ('serviceWorker' in navigator) {
       });
   });
 }
+
+// Initialize offline queue detection
+window.addEventListener('DOMContentLoaded', () => {
+  // Load any persisted queue
+  requestQueue.loadQueue().then(() => {
+    // Set up online/offline listeners to process queue
+    const unsubscribe = onOnlineChange((isOnline) => {
+      if (isOnline) {
+        // Process queue when we come back online
+        requestQueue.processQueue();
+      }
+    });
+    
+    // Store unsubscribe function for cleanup if needed
+    window.__offlineQueueUnsubscribe = unsubscribe;
+  });
+});
 
 document.addEventListener('DOMContentLoaded', async () => {
   const staffBtn = document.getElementById('staff-btn');
@@ -36,7 +54,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // App is running as a standalone PWA
     document.documentElement.classList.add('standalone');
   }
-  
+
   // For index.html, we don't require auth - user chooses role first
   // Auth is required on staff.html and worker.html
 });

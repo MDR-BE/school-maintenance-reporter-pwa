@@ -1,8 +1,9 @@
 // worker.js - Maintenance worker interface logic for the Maintenance PWA (ES Module)
 
-import { fetchTasks, fetchTask, updateTask, parsePhotoData, clearApiCache } from './api.js';
+import { fetchTasks, fetchTask, updateTask, parsePhotoData, clearApiCache, fetchTaskCounts } from './api.js';
 import { showMessage, hideMessage, formatDateTime, escapeHtml, createSafeElement, debounce } from './utils.js';
 import { requireAuth, logout } from './auth.js';
+import { TASK_STATUSES, URGENCY_LEVELS } from './constants.js';
 
 // Module-level variables (fixed scope issues)
 let filterStatus = null;
@@ -15,6 +16,7 @@ let taskDetailContent = null;
 let backToListBtn = null;
 let currentTasks = [];
 let currentTaskId = null;
+let dashboardElements = {}; // For dashboard stats
 
 /**
  * Initializes DOM references and event listeners.
@@ -30,11 +32,20 @@ function initializeDOM() {
   taskDetailContainer = document.getElementById('task-detail-container');
   backToListBtn = document.getElementById('back-to-list');
   taskDetailContent = document.getElementById('task-detail-content');
+  
+  // Dashboard elements
+  dashboardElements.urgent = document.getElementById('urgent-count');
+  dashboardElements.important = document.getElementById('important-count');
+  dashboardElements.normal = document.getElementById('normal-count');
+  dashboardElements['in-progress'] = document.getElementById('in-progress-count');
+  dashboardElements.waiting = document.getElementById('waiting-count');
+  dashboardElements.completed = document.getElementById('completed-count');
 
   // Event listeners for filters
   if (applyFiltersBtn) {
     applyFiltersBtn.addEventListener('click', () => {
       loadTasks();
+      loadDashboard(); // Also refresh dashboard when filters change
     });
   }
 
@@ -44,6 +55,7 @@ function initializeDOM() {
       if (filterUrgency) filterUrgency.value = '';
       if (filterLocation) filterLocation.value = '';
       loadTasks();
+      loadDashboard(); // Also refresh dashboard
     });
   }
 
@@ -103,7 +115,7 @@ async function loadTasks() {
     renderTaskList();
   } catch (error) {
     console.error('Error loading tasks:', error);
-    
+
     let message = 'Failed to load tasks. Please try again.';
     if (error.message === 'AUTH_EXPIRED') {
       message = 'Uw sessie is verlopen. Gelieve opnieuw in te loggen.';
@@ -111,10 +123,34 @@ async function loadTasks() {
     } else if (error.code) {
       message = `Fout: ${error.message}`;
     }
-    
+
     taskListLoading.textContent = message;
   } finally {
     taskListLoading.classList.add('hidden');
+  }
+}
+
+/**
+ * Loads dashboard statistics (task counts by status).
+ */
+async function loadDashboard() {
+  try {
+    const counts = await fetchTaskCounts();
+    
+    // Update dashboard elements
+    if (dashboardElements.urgent) dashboardElements.urgent.textContent = counts.Urgent || 0;
+    if (dashboardElements.important) dashboardElements.important.textContent = counts.Important || 0;
+    if (dashboardElements.normal) dashboardElements.normal.textContent = counts.Normal || 0;
+    if (dashboardElements['in-progress']) dashboardElements['in-progress'].textContent = counts['In progress'] || 0;
+    if (dashboardElements.waiting) dashboardElements.waiting.textContent = counts['Waiting for materials'] || 0;
+    if (dashboardElements.completed) dashboardElements.completed.textContent = counts.Completed || 0;
+  } catch (error) {
+    console.error('Error loading dashboard:', error);
+    // Don't show error to user for dashboard - it's not critical
+    // Set all counts to 0 or show error state if desired
+    Object.values(dashboardElements).forEach(el => {
+      if (el) el.textContent = '0';
+    });
   }
 }
 
@@ -359,18 +395,17 @@ function showStatusUpdateModal(task) {
   const form = createSafeElement('form', null, { id: 'status-form' });
   
   const selectDiv = createSafeElement('div', null, { style: 'margin-bottom:1rem;' });
-  const label = createSafeElement('label', 'Nieuwe status:', { 
-    for: 'status-select', 
-    style: 'display:block;margin-bottom:0.5rem;font-weight:500;' 
+  const label = createSafeElement('label', 'Nieuwe status:', {
+    for: 'status-select',
+    style: 'display:block;margin-bottom:0.5rem;font-weight:500;'
   });
-  const select = createSafeElement('select', null, { 
-    id: 'status-select', 
+  const select = createSafeElement('select', null, {
+    id: 'status-select',
     required: true,
     style: 'width:100%;padding:0.5rem;border:1px solid #ddd;border-radius:4px;'
   });
   
-  const statuses = ['New', 'Planned', 'In progress', 'Waiting for materials', 'Completed'];
-  statuses.forEach(s => {
+  TASK_STATUSES.forEach(s => {
     const option = createSafeElement('option', s, { value: s });
     select.appendChild(option);
   });
@@ -380,16 +415,16 @@ function showStatusUpdateModal(task) {
   form.appendChild(selectDiv);
   
   const btnDiv = createSafeElement('div', null, { style: 'display:flex;gap:0.5rem;' });
-  const submitBtn = createSafeElement('button', 'Bijwerken', { 
-    type: 'submit', 
+  const submitBtn = createSafeElement('button', 'Bijwerken', {
+    type: 'submit',
     class: 'submit-btn',
-    style: 'flex:1;' 
+    style: 'flex:1;'
   });
-  const cancelBtn = createSafeElement('button', 'Annuleren', { 
-    type: 'button', 
-    id: 'cancel-status-btn', 
+  const cancelBtn = createSafeElement('button', 'Annuleren', {
+    type: 'button',
+    id: 'cancel-status-btn',
     class: 'cancel-btn',
-    style: 'flex:1;' 
+    style: 'flex:1;'
   });
   
   btnDiv.appendChild(submitBtn);
@@ -401,12 +436,12 @@ function showStatusUpdateModal(task) {
   modalContent.appendChild(form);
   modal.appendChild(modalContent);
   document.body.appendChild(modal);
-
+  
   // Set current status
   select.value = task.status;
-
+  
   const closeModal = () => modal.remove();
-
+  
   closeBtn.addEventListener('click', closeModal);
   cancelBtn.addEventListener('click', closeModal);
   
@@ -414,7 +449,7 @@ function showStatusUpdateModal(task) {
   modal.addEventListener('click', (e) => {
     if (e.target === modal) closeModal();
   });
-
+  
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const newStatus = select.value;
@@ -422,7 +457,7 @@ function showStatusUpdateModal(task) {
       showMessage('status-form', 'Gelieve een status te selecteren.', 'error');
       return;
     }
-
+    
     try {
       await updateTaskStatus(task.id, newStatus);
       showMessage('status-form', 'Status succesvol bijgewerkt.', 'success');
@@ -619,4 +654,5 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   initializeDOM();
   loadTasks();
+  loadDashboard(); // Load dashboard stats
 });

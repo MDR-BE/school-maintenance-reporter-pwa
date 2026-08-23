@@ -1,18 +1,33 @@
 // staff.js - Staff interface logic for the Maintenance PWA (ES Module)
 
-import { createTask, validatePhotoFile, processImage } from './api.js';
+import { createTask } from './api.js';
 import { showMessage, hideMessage, escapeHtml } from './utils.js';
 import { requireAuth, logout } from './auth.js';
+import { createPhotoHandler, validatePhotos, processPhotosForUpload } from './photos.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
   // Require authentication
   await requireAuth();
+  
+  // Check for URL parameters (for future QR code compatibility)
+  const urlParams = new URLSearchParams(window.location.search);
+  const locationParam = urlParams.get('location');
+  if (locationParam) {
+    // Pre-fill location if provided via URL (for QR code scanning)
+    const locationInput = document.getElementById('location');
+    if (locationInput) {
+      locationInput.value = decodeURIComponent(locationParam);
+      // Optionally highlight or show that it's pre-filled
+      locationInput.style.border = '2px solid #0066cc';
+    }
+  }
   
   const form = document.getElementById('issueForm');
   const formMessage = document.getElementById('form-message');
   const cancelBtn = document.getElementById('cancelButton');
   const photoInput = document.getElementById('photo');
   const photoPreview = document.getElementById('photo-preview');
+  const capturePhotoBtn = document.getElementById('capturePhoto');
 
   // Add logout button to header
   const header = document.querySelector('h1');
@@ -34,92 +49,83 @@ document.addEventListener('DOMContentLoaded', async () => {
     cancelBtn.addEventListener('click', () => {
       form.reset();
       hideMessage('form-message');
-      if (photoPreview) photoPreview.innerHTML = '';
+      // Reset photo handler
+      if (window.photoHandler) window.photoHandler.clear();
       window.location.href = './index.html';
     });
   }
 
-  // Photo preview
-  if (photoInput && photoPreview) {
-    photoInput.addEventListener('change', (e) => {
-      photoPreview.innerHTML = '';
-      const file = e.target.files[0];
-      if (file) {
-        const validation = validatePhotoFile(file);
-        if (!validation.valid) {
-          showMessage('form-message', validation.error, 'error');
-          photoInput.value = '';
-          return;
-        }
-        
-        const img = document.createElement('img');
-        img.src = URL.createObjectURL(file);
-        img.style.maxWidth = '100%';
-        img.style.maxHeight = '200px';
-        img.style.borderRadius = '4px';
-        img.style.border = '1px solid #ddd';
-        photoPreview.appendChild(img);
-      }
+  // Initialize photo handler
+  const photoHandler = createPhotoHandler(photoInput, photoPreview, (files) => {
+    // Update photo count display or other UI if needed
+  });
+  window.photoHandler = photoHandler; // Make accessible globally for cleanup
+
+  // Setup camera capture
+  if (capturePhotoBtn) {
+    // Import and use camera capture from photos.js
+    import('./photos.js').then(({ createCameraCapture }) => {
+      createCameraCapture(capturePhotoBtn, (file) => {
+        photoHandler.addFiles([file]);
+      });
     });
   }
 
   if (form) {
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
-
+      
       // Show loading state
       const submitBtn = form.querySelector('.submit-btn');
       submitBtn.disabled = true;
       submitBtn.textContent = 'Versturen...';
-
+      
       // Collect form data
       const description = form.description.value.trim();
-      const requester_name = form.requester_name.value.trim();
       const location = form.location.value.trim();
-      const required_materials = form.required_materials.value.trim();
       const urgency = form.urgency.value;
-      const status = form.status.value;
-      const photoInput = form.photo.files[0]; // File object
-
+      
       // Validate required fields
-      if (!description || !requester_name || !location || !urgency) {
+      if (!description || !location || !urgency) {
         showMessage('form-message', 'Gelieve alle verplichte velden in te vullen.', 'error');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Issue melden';
+        // Reset photo handler on validation error
+        if (window.photoHandler) window.photoHandler.clear();
+        return;
+      }
+      
+      // Get selected photos
+      const selectedFiles = photoHandler.getFiles();
+      
+      // Validate photos
+      const photoValidation = validatePhotos(selectedFiles);
+      if (!photoValidation.valid) {
+        showMessage('form-message', photoValidation.errors.join('\n'), 'error');
         submitBtn.disabled = false;
         submitBtn.textContent = 'Issue melden';
         return;
       }
-
-      // Validate photo if provided
-      let photos = [];
-      if (photoInput) {
-        const validation = validatePhotoFile(photoInput);
-        if (!validation.valid) {
-          showMessage('form-message', validation.error, 'error');
-          submitBtn.disabled = false;
-          submitBtn.textContent = 'Issue melden';
-          return;
-        }
-        photos = [photoInput];
-      }
-
+      
       try {
+        // Process photos for upload
+        const processedPhotos = await processPhotosForUpload(selectedFiles);
+        
         // Prepare task data for API
         const taskData = {
           description: description,
-          requester_name: requester_name,
           location: location,
-          required_materials: required_materials,
-          urgency: urgency,
-          status: status
+          urgency: urgency
         };
-
+        
         // Use shared API layer
-        const result = await createTask(taskData, photos);
-
+        const result = await createTask(taskData, processedPhotos);
+        
         if (result && result.taskId) {
           showMessage('form-message', 'Uw rapport is ontvangen en toegevoegd aan de onderhoudslijst.', 'success');
           form.reset();
-          if (photoPreview) photoPreview.innerHTML = '';
+          // Clear photo handler
+          if (window.photoHandler) window.photoHandler.clear();
           
           // Optionally, show the task ID
           const taskIdEl = document.createElement('p');

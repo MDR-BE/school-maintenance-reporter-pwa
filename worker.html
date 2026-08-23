@@ -14,6 +14,37 @@
             <button id="logout-btn" class="cancel-btn" style="padding:0.5rem 1rem;font-size:0.9rem;">Logout</button>
         </header>
         
+        <!-- Dashboard Section -->
+        <div id="dashboard">
+            <h2>Overzicht</h2>
+            <div class="dashboard-stats">
+                <div class="stat-card urgent">
+                    <h3>Urgent</h3>
+                    <p id="urgent-count">0</p>
+                </div>
+                <div class="stat-card important">
+                    <h3>Important</h3>
+                    <p id="important-count">0</p>
+                </div>
+                <div class="stat-card normal">
+                    <h3>Normal</h3>
+                    <p id="normal-count">0</p>
+                </div>
+                <div class="stat-card in-progress">
+                    <h3>In Progress</h3>
+                    <p id="in-progress-count">0</p>
+                </div>
+                <div class="stat-card waiting">
+                    <h3>Waiting</h3>
+                    <p id="waiting-count">0</p>
+                </div>
+                <div class="stat-card completed">
+                    <h3>Completed</h3>
+                    <p id="completed-count">0</p>
+                </div>
+            </div>
+        </div>
+        
         <div class="worker-toolbar">
             <div class="filter-group">
                 <label for="filter-status">Status:</label>
@@ -42,20 +73,20 @@
             <button id="apply-filters" class="submit-btn">Apply Filters</button>
             <button id="reset-filters" class="cancel-btn">Reset</button>
         </div>
-
+        
         <div id="task-list-container">
-            <h2>Tasks</h2>
-            <div id="task-list-loading">Loading tasks...</div>
+            <h2>Taken</h2>
+            <div id="task-list-loading">Taken laden...</div>
             <ul id="task-list" class="task-list"></ul>
         </div>
-
+        
         <div id="task-detail-container" class="hidden">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
-                <h2>Task Details</h2>
-                <button id="back-to-list" class="cancel-btn">&#8592; Back to List</button>
+                <h2>Taak Details</h2>
+                <button id="back-to-list" class="cancel-btn">&#8592; Terug naar lijst</button>
             </div>
             <div id="task-detail-content">
-                <!-- Task detail will be inserted here -->
+                <!-- Taak detail zal hier worden ingevoegd -->
             </div>
         </div>
     </div>

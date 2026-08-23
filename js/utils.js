@@ -5,8 +5,14 @@
  * Must be configured after deployment.
  */
 export function getApiBaseUrl() {
+  // Try to get from localStorage first (set after deployment)
+  const savedUrl = localStorage.getItem('pwa_api_base_url');
+  if (savedUrl) {
+    return savedUrl;
+  }
+  
+  // Fallback to a default that should be replaced
   // TODO: Replace with the actual web app URL after deployment
-  // For now, we'll return a placeholder; the user must update this.
   return 'https://script.google.com/macros/s/AKfycbzsGdvD4ATywZzchjfozluOgtlw6mR2vZKUZuTpmcd1qyPNmH_0rzjUEaahQCQkxVLJ/exec';
 }
 
@@ -15,6 +21,10 @@ export function getApiBaseUrl() {
  * @return {string} A UUID-like string.
  */
 export function generateUuid() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  // Fallback for older browsers
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
     const r = Math.random() * 16 | 0;
     const v = c === 'x' ? r : (r & 0x3 | 0x8);
@@ -254,5 +264,108 @@ export function parsePhotoData(photoData) {
       .map(url => ({ url, filename: '', id: '', mimeType: '' }));
   }
   
-  return [];
+  /**
+ * Returns true if browser is online, false if offline
+ * @return {boolean} Online status
+ */
+export function isOnline() {
+  return navigator.onLine;
 }
+
+/**
+ * Returns a Promise that resolves when online status changes
+ * @param {Function} callback - Function to call when status changes
+ * @return {Function} Unsubscribe function
+ */
+export function onOnlineChange(callback) {
+  const handler = () => callback(navigator.onLine);
+  window.addEventListener('online', handler);
+  window.addEventListener('offline', handler);
+  return () => {
+    window.removeEventListener('online', handler);
+    window.removeEventListener('offline', handler);
+  };
+}
+
+/**
+ * Simple request queue for offline storage (preparation for future implementation)
+ */
+class RequestQueue {
+  constructor() {
+    this.queue = [];
+    this.processing = false;
+  }
+
+  /**
+   * Add a request to the queue
+   * @param {Object} request - {url, options, timestamp}
+   */
+  async enqueue(request) {
+    this.queue.push({
+      ...request,
+      timestamp: Date.now()
+    });
+    await this.persistQueue();
+    if (!this.processing) {
+      this.processQueue();
+    }
+  }
+
+  /**
+   * Process all queued requests
+   */
+  async processQueue() {
+    if (this.processing || !navigator.onLine) return;
+    
+    this.processing = true;
+    while (this.queue.length > 0 && navigator.onLine) {
+      const request = this.queue.shift();
+      try {
+        // Attempt the request
+        await timeoutFetch(request.url, request.options);
+        await this.persistQueue(); // Update persisted queue
+      } catch (error) {
+        // If request fails, put it back at the end of the queue
+        console.warn('Request failed, re-queuing:', error);
+        this.queue.push(request);
+        await this.persistQueue();
+        break; // Stop processing if we're offline now
+      }
+    }
+    this.processing = false;
+    
+    // Retry after a delay if there are still items
+    if (this.queue.length > 0) {
+      setTimeout(() => this.processQueue(), 30000); // 30 seconds
+    }
+  }
+
+  /**
+   * Persist queue to localStorage
+   */
+  async persistQueue() {
+    try {
+      localStorage.setItem('pwa_request_queue', JSON.stringify(this.queue));
+    } catch (e) {
+      console.warn('Failed to persist request queue:', e);
+    }
+  }
+
+  /**
+   * Load queue from localStorage
+   */
+  async loadQueue() {
+    try {
+      const saved = localStorage.getItem('pwa_request_queue');
+      if (saved) {
+        this.queue = JSON.parse(saved);
+      }
+    } catch (e) {
+      console.warn('Failed to load request queue:', e);
+      this.queue = [];
+    }
+  }
+}
+
+// Create singleton instance
+export const requestQueue = new RequestQueue();

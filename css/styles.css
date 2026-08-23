@@ -53,6 +53,127 @@ h1 {
     text-align: center;
 }
 
+/* Dashboard styles */
+#dashboard {
+    background-color: white;
+    padding: 1.5rem;
+    border-radius: 8px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    margin-bottom: 2rem;
+}
+
+#dashboard h2 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+    color: #0066cc;
+    text-align: center;
+}
+
+.dashboard-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 1rem;
+}
+
+.stat-card {
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    padding: 1rem;
+    text-align: center;
+    border-left: 4px solid #ddd;
+    transition: transform 0.2s;
+}
+
+.stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.stat-card h3 {
+    margin: 0 0 0.5rem 0;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.stat-card p {
+    font-size: 2rem;
+    font-weight: bold;
+    margin: 0;
+}
+
+.stat-card.urgent {
+    border-left-color: #dc3545;
+}
+
+.stat-card.urgent h3 {
+    color: #dc3545;
+}
+
+.stat-card.urgent p {
+    color: #dc3545;
+}
+
+.stat-card.important {
+    border-left-color: #ffc107;
+}
+
+.stat-card.important h3 {
+    color: #856404;
+}
+
+.stat-card.important p {
+    color: #856404;
+}
+
+.stat-card.normal {
+    border-left-color: #28a745;
+}
+
+.stat-card.normal h3 {
+    color: #28a745;
+}
+
+.stat-card.normal p {
+    color: #28a745;
+}
+
+.stat-card.in-progress {
+    border-left-color: #17a2b8;
+}
+
+.stat-card.in-progress h3 {
+    color: #17a2b8;
+}
+
+.stat-card.in-progress p {
+    color: #17a2b8;
+}
+
+.stat-card.waiting {
+    border-left-color: #6c757d;
+}
+
+.stat-card.waiting h3 {
+    color: #6c757d;
+}
+
+.stat-card.waiting p {
+    color: #6c757d;
+}
+
+.stat-card.completed {
+    border-left-color: #28a745;
+}
+
+.stat-card.completed h3 {
+    color: #28a745;
+}
+
+.stat-card.completed p {
+    color: #28a745;
+}
+
 /* Form styles */
 form {
     display: flex;
@@ -78,6 +199,16 @@ input, select, textarea {
 
 input[type="file"] {
     padding: 0.5rem;
+}
+
+.photo-upload {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.photo-upload button {
+    align-self: flex-start;
 }
 
 button.submit-btn {

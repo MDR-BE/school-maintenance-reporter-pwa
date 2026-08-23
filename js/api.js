@@ -1,3 +1,21 @@
+// Timeout for fetch requests in milliseconds
+const FETCH_TIMEOUT = 8000;
+
+/**
+ * Fetch with timeout
+ * @param {string} url - URL to fetch
+ * @param {Object} options - Fetch options
+ * @returns {Promise<Response>}
+ */
+async function timeoutFetch(url, options) {
+  return Promise.race([
+    fetch(url, options),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Request timeout')), FETCH_TIMEOUT)
+    )
+  ]);
+}
+
 // api.js - API client for the Maintenance PWA (ES Module)
 
 import { getApiBaseUrl, getAuthToken } from './utils.js';
@@ -54,7 +72,8 @@ async function apiFetch(endpoint, options = {}, useCache = false) {
     body = params.toString();
   }
   
-  const response = await fetch(url.toString(), {
+  // Use timeoutFetch instead of regular fetch
+  const response = await timeoutFetch(url.toString(), {
     ...options,
     headers,
     body
@@ -144,30 +163,49 @@ export async function fetchTaskCounts() {
  * @returns {Promise<Object>} Result with taskId and task
  */
 export async function createTask(taskData, photos = null) {
-  const photoArray = photos
-    ? (Array.isArray(photos) ? photos : [photos])
-    : [];
+  try {
+    const photoArray = photos
+      ? (Array.isArray(photos) ? photos : [photos])
+      : [];
   
-  // Process photos to base64
-  const convertedPhotos = await Promise.all(
-    photoArray.map(photoToBase64)
-  );
+    // Process photos to base64 with individual error handling
+    const convertedPhotos = [];
+    for (const photo of photoArray) {
+      try {
+        const base64 = await photoToBase64(photo);
+        convertedPhotos.push({
+          filename: photo.name,
+          mimeType: photo.type,
+          base64: base64
+        });
+      } catch (photoError) {
+        console.error('Error processing photo:', photoError);
+        throw new Error(`Failed to process photo ${photo.name}: ${photoError.message}`);
+      }
+    }
   
-  // Prepare payload
-  const payload = {
-    ...taskData,
-    photos: convertedPhotos
-  };
+    // Prepare payload
+    const payload = {
+      ...taskData,
+      photos: convertedPhotos
+    };
   
-  // Remove photos from payload if empty (optional field)
-  if (convertedPhotos.length === 0) {
-    delete payload.photos;
+    // Remove photos from payload if empty (optional field)
+    if (convertedPhotos.length === 0) {
+      delete payload.photos;
+    }
+  
+    return apiFetch('', {
+      method: 'POST',
+      body: { action: 'create', ...payload }
+    });
+  } catch (error) {
+    // Re-throw with additional context if needed
+    if (error.message === 'AUTH_EXPIRED') {
+      throw error;
+    }
+    throw new Error(`Failed to create task: ${error.message}`);
   }
-  
-  return apiFetch('', {
-    method: 'POST',
-    body: { action: 'create', ...payload }
-  });
 }
 
 /**
@@ -177,10 +215,17 @@ export async function createTask(taskData, photos = null) {
  * @returns {Promise<Object>} Updated task
  */
 export async function updateTask(taskId, updates) {
-  return apiFetch('', {
-    method: 'POST',
-    body: { action: 'update', id: taskId, ...updates }
-  });
+  try {
+    return apiFetch('', {
+      method: 'POST',
+      body: { action: 'update', id: taskId, ...updates }
+    });
+  } catch (error) {
+    if (error.message === 'AUTH_EXPIRED') {
+      throw error;
+    }
+    throw new Error(`Failed to update task: ${error.message}`);
+  }
 }
 
 /**
@@ -190,13 +235,32 @@ export async function updateTask(taskId, updates) {
  * @returns {Promise<Object>} Updated task
  */
 export async function uploadPhotos(taskId, photos) {
-  const photoArray = Array.isArray(photos) ? photos : [photos];
-  const convertedPhotos = await Promise.all(
-    photoArray.map(photoToBase64)
-  );
-  
-  return apiFetch('', {
-    method: 'POST',
-    body: { action: 'upload_photos', id: taskId, photos: convertedPhotos }
-  });
+  try {
+    const photoArray = Array.isArray(photos) ? photos : [photos];
+    const convertedPhotos = [];
+    
+    for (const photo of photoArray) {
+      try {
+        const base64 = await photoToBase64(photo);
+        convertedPhotos.push({
+          filename: photo.name,
+          mimeType: photo.type,
+          base64: base64
+        });
+      } catch (photoError) {
+        console.error('Error processing photo for upload:', photoError);
+        throw new Error(`Failed to process photo ${photo.name} for upload: ${photoError.message}`);
+      }
+    }
+    
+    return apiFetch('', {
+      method: 'POST',
+      body: { action: 'upload_photos', id: taskId, photos: convertedPhotos }
+    });
+  } catch (error) {
+    if (error.message === 'AUTH_EXPIRED') {
+      throw error;
+    }
+    throw new Error(`Failed to upload photos: ${error.message}`);
+  }
 }

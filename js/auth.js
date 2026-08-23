@@ -62,15 +62,14 @@ export async function validateTokenWithServer() {
   if (!token) return false;
   
   try {
-    const response = await fetch(getApiBaseUrl() + '?action=get&id=test', {
-      method: 'GET',
+    const response = await fetch(getApiBaseUrl() + '?action=validate', {
+      method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded'
       }
     });
     
-    // We use a dummy GET request to check auth - the server will reject if token invalid
-    // Better: add a dedicated validate endpoint, but for now this works
+    // We use a dedicated validate endpoint to check auth
     return response.ok;
   } catch (e) {
     return false;
@@ -134,14 +133,14 @@ function showLoginModal() {
     title.style.color = '#333';
     
     const form = document.createElement('form');
-    form.id = 'loginForm';
-    form.innerHTML = `
-      <label for="password" style="display:block;margin-top:1.5rem;font-weight:500;">Wachtwoord:</label>
-      <input type="password" id="password" name="password" autocomplete="current-password" required 
-        style="width:100%;padding:0.75rem;margin-top:0.5rem;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:1rem;">
-      <button type="submit" style="margin-top:1.5rem;width:100%;padding:0.75rem;background:#1976d2;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:1rem;">Inloggen</button>
-      <div id="error" style="color:#d32f2f;margin-top:1rem;font-size:0.9rem;min-height:1.2em;"></div>
-    `;
+        form.id = 'loginForm';
+        form.innerHTML = `
+          <label for="password" style="display:block;margin-top:1.5rem;font-weight:500;">Wachtwoord:</label>
+          <input type="password" id="password" name="password" autocomplete="current-password" required 
+            style="width:100%;padding:0.75rem;margin-top:0.5rem;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:1rem;">
+          <button type="submit" style="margin-top:1.5rem;width:100%;padding:0.75rem;background:#1976d2;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:1rem;">Inloggen</button>
+          <div id="error" style="color:#d32f2f;margin-top:1rem;font-size:0.9rem;min-height:1.2em;"></div>
+        `;
     
     box.appendChild(title);
     box.appendChild(form);

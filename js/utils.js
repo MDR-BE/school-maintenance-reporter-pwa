@@ -13,7 +13,7 @@ export function getApiBaseUrl() {
   
   // Fallback to a default that should be replaced
   // TODO: Replace with the actual web app URL after deployment
-  return 'https://script.google.com/macros/s/AKfycbzsGdvD4ATywZzchjfozluOgtlw6mR2vZKUZuTpmcd1qyPNmH_0rzjUEaahQCQkxVLJ/exec';
+  return 'https://script.google.com/macros/s/AKfycbxXN3zximKqdSSDK8P1fUH1UfB0EWbFU_RLaYm8c-bXS-leupuHAnML8az4fvX0vaj2/exec';
 }
 
 /**

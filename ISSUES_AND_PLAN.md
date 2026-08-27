@@ -188,7 +188,7 @@ Based on review of the codebase against the specification in `starting-prompt`, 
 - Create mapping document verifying all field translations
 - Ensure consistency between:
   - Frontend field names
-  - Backend column indices (in Tasks.gs)
+  - Backend column indices (in the task section of Code.gs)
   - Dutch-to-English mappings
   - Sheet headers
 

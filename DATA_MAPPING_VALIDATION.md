@@ -25,7 +25,7 @@ const payload = {
 };
 ```
 
-### Backend Reception (Tasks.gs createTask)
+### Backend Reception (Code.gs task section: createTask)
 The backend receives the payload as `taskData` parameter and processes it:
 
 | Frontend Field | Backend Usage | Column Mapping | Default if Missing | Notes |
@@ -75,7 +75,7 @@ The backend receives the payload as `taskData` parameter and processes it:
    ```
 3. Sent to backend via API as `taskData.photos`
 
-**Backend Processing (Photos.gs uploadPhotos):**
+**Backend Processing (Code.gs photo section: uploadPhotos):**
 1. Receives array of `{base64, filename, mimeType}`  
 2. Validates each photo
 3. Stores in Google Drive under: `Maintenance PWA/[year]/task-[taskId]/`
@@ -88,7 +88,7 @@ The backend receives the payload as `taskData` parameter and processes it:
    - Old format: comma-separated URL string (for backward compatibility)
 
 ### Field Length & Validation
-According to Config.gs limits:
+According to the limits in Code.gs:
 - Description: max 2000 chars ✓ (textarea allows unlimited but backend validates)
 - Location: max 200 chars ✓  
 - Urgency: validated via dropdown ✓
@@ -146,7 +146,7 @@ Maintenance Worker PWA:
 
 2. **Validate required_materials**: Currently allowed to be empty, which is fine since staff may not know material needs.
 
-3. **Ensure backend validation**: Confirm that Validation.gs (if it exists) or Tasks.gs has appropriate validation for required fields like description and location.
+3. **Ensure backend validation**: Confirm that the validation section in Code.gs has appropriate validation for required fields like description and location.
 
 4. **Test round-trip integrity**: Create task via frontend → verify in sheet → retrieve via frontend → verify data matches.
 

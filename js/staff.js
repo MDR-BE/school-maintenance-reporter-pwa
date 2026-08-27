@@ -83,10 +83,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Collect form data
       const description = form.description.value.trim();
       const location = form.location.value.trim();
+      const requester_name = form.requester_name.value.trim();
       const urgency = form.urgency.value;
       
       // Validate required fields
-      if (!description || !location || !urgency) {
+      if (!description || !location || !requester_name || !urgency) {
         showMessage('form-message', 'Gelieve alle verplichte velden in te vullen.', 'error');
         submitBtn.disabled = false;
         submitBtn.textContent = 'Issue melden';
@@ -115,6 +116,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const taskData = {
           description: description,
           location: location,
+          requester_name: requester_name,
           urgency: urgency
         };
         
